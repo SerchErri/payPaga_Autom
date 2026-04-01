@@ -1,0 +1,24 @@
+# Dependencias de Node
+node_modules/
+
+# Reportes de Allure
+allure-report/
+allure-results/
+
+# Archivos de Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Entorno (variables sensibles)
+.env
+.env.test
+
+# Archivos de cache provistos por herramientas de desarrollo
+.eslintcache
+.stylelintcache
+.prettiercache
