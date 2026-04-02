@@ -28,7 +28,8 @@ describe(`[Payout H2H Ecuador] Camino Feliz y Saldo (available_for_payout) [Ambi
         }
         
         expect(balanceResponse.status).toBe(200);
-        const available = Number(balanceResponse.data.available_for_payout || 0);
+        const ecData = balanceResponse.data.countries && balanceResponse.data.countries.find(c => c.country === 'EC');
+        const available = Number(ecData ? ecData.available_for_payout : 0);
         expect(available).toBeGreaterThanOrEqual(0);
 
         // ==========================================
@@ -38,7 +39,7 @@ describe(`[Payout H2H Ecuador] Camino Feliz y Saldo (available_for_payout) [Ambi
         // Evitamos enviar mayor valor del disponible en base al spec.
         const payoutAmount = Math.min(desiredAmount, available);
 
-        const payoutUrl = `${envConfig.BASE_URL}/v2/payout`;
+        const payoutUrl = `${envConfig.BASE_URL}/payout`;
         const payload = {
             country_code: 'EC',
             currency: 'USD',

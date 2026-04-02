@@ -6,7 +6,7 @@ const allure = require('allure-js-commons');
 const { getAccessToken } = require('../../utils/authHelper');
 const envConfig = require('../../utils/envConfig');
 
-const BASE_URL = `${envConfig.BASE_URL}/v2/payout`;
+const BASE_URL = `${envConfig.BASE_URL}/payout`;
 
 describe(`[Payout H2H Ecuador] Validación Estricta Backend [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
     let freshToken = '';
@@ -138,7 +138,8 @@ describe(`[Payout H2H Ecuador] Validación Estricta Backend [Ambiente: ${envConf
                 headers: { 'Authorization': `Bearer ${freshToken}`, 'DisablePartnerMock': 'true' },
                 validateStatus: () => true
             });
-            const available = Number(balanceResponse.data.available_for_payout || 0);
+            const ecData = balanceResponse.data.countries && balanceResponse.data.countries.find(c => c.country === 'EC');
+            const available = Number(ecData ? ecData.available_for_payout : 0);
 
             // Requerir Payout superior al disponible
             const p = generateBasePayload();
