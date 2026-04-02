@@ -33,12 +33,13 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
         await btnLogin.evaluate(node => node.disabled = false).catch(()=>null);
         await btnLogin.click({ force: true });
         
-        // Espera explícita para que React despierte tras entrar al Dashboard
-        await sharedPage.waitForTimeout(3000); 
-
         // NAVEGAR MANUALMENTE LA PRIMERA VEZ PARA OBTENER LA RUTA ABSOLUTA DEL DEEP LINK (React)
         const btnTransacciones = sharedPage.getByRole('link', { name: ' Transacciones ' }).first();
         await btnTransacciones.waitFor({ state: 'visible', timeout: 20000 });
+        
+        // Espera explícita para que React hidrate los eventos ocultos tras pintar el DOM
+        await sharedPage.waitForTimeout(3000); 
+
         await btnTransacciones.click();
         
         const btnSalida = sharedPage.getByRole('link', { name: 'Transacciones de Salida' }).first();

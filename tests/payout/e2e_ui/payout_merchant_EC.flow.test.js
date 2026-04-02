@@ -53,11 +53,11 @@ describe(`[E2E UI] MERCHANT PORTAL EC: Creación de Payout [Ambiente: ${envConfi
         const btnTransacciones = page.getByRole('link', { name: ' Transacciones ' }).first();
         await btnTransacciones.waitFor({ state: 'visible', timeout: 20000 });
         
+        // Espera explícita para hidratación React
+        await page.waitForTimeout(3000); 
+        
         await attachScreenshot('Dashboard Merchant Tras Login');
 
-        // =========================================================
-        // 2. NAVEGACIÓN BASADA EN EL CODEGEN
-        // =========================================================
         // Abre menú transacciones
         await btnTransacciones.click();
         
