@@ -99,7 +99,7 @@ describe(`[E2E Exhaustiva Desacoplada] Validaciones UI de Formularios PayUrl [Am
         });
         const url = postRes.data.pay_url;
 
-        const context = await browser.newContext({ locale: 'es-ES' });
+        const context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
         const page = await context.newPage();
         // Super optimización: En vez de esperar trackers de Analytics (networkidle), cargamos apenas el DOM esté listo
         await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -128,6 +128,13 @@ describe(`[E2E Exhaustiva Desacoplada] Validaciones UI de Formularios PayUrl [Am
     };
 
     const attemptSubmit = async (page) => {
+        if (allure && allure.attachment) {
+            try {
+                await page.waitForTimeout(500);
+                const buffer = await page.screenshot({ fullPage: true });
+                allure.attachment(`📸 Formulario Lleno (Antes de Submit)`, buffer, "image/png");
+            } catch(e) {}
+        }
         const btn = page.locator('#submit_payment');
         await btn.evaluate(node => node.disabled = false).catch(()=>null);
         await btn.click({ force: true }).catch(()=>null);
@@ -182,8 +189,17 @@ describe(`[E2E Exhaustiva Desacoplada] Validaciones UI de Formularios PayUrl [Am
             const { url, page, context } = await generarYPrepararCheckout();
             await fillBaseForm(page);
             await typeSafe(page, '#first_name', "O'Connor"); 
+            
+            if (allure && allure.attachment) {
+                await page.waitForTimeout(500);
+                allure.attachment(`📸 Formulario Lleno (Antes de Submit)`, await page.screenshot({ fullPage: true }), "image/png");
+            }
+            
+            // Clic real
+            await page.locator('#submit_payment').click();
+            await page.waitForTimeout(3000);
+
             const rounded = await attachEvidence('FN - Apóstrofes y Feliz', page, "First Name: 'O'Connor'", url);
-            // El assert es Rojo si la prueba detectó que el botón NO se activó (es un bug del Frontend)
             expect(rounded.isBotonBloqueado).toBe(false); 
             await context.close();
         });
@@ -237,6 +253,16 @@ describe(`[E2E Exhaustiva Desacoplada] Validaciones UI de Formularios PayUrl [Am
             const { url, page, context } = await generarYPrepararCheckout();
             await fillBaseForm(page);
             await typeSafe(page, '#last_name', "Torres-Gomez"); 
+            
+            if (allure && allure.attachment) {
+                await page.waitForTimeout(500);
+                allure.attachment(`📸 Formulario Lleno (Antes de Submit)`, await page.screenshot({ fullPage: true }), "image/png");
+            }
+            
+            // Clic real
+            await page.locator('#submit_payment').click();
+            await page.waitForTimeout(3000);
+
             const rounded = await attachEvidence('LN - Guion Valido', page, "Last Name: 'Torres-Gomez'", url);
             expect(rounded.isBotonBloqueado).toBe(false);
             await context.close();
@@ -287,8 +313,21 @@ describe(`[E2E Exhaustiva Desacoplada] Validaciones UI de Formularios PayUrl [Am
             await page.selectOption('#document_type', 'PP');
             const limitePermitido = 'A1B2C3D4E5QW9'; 
             await typeSafe(page, '#document_number', limitePermitido); 
-            const r = await attachEvidence('PP - Boundary Máximo Soportado', page, `PP: ${limitePermitido}`, url);
-            expect(r.isBotonBloqueado).toBe(false);
+            
+            if (allure && allure.attachment) {
+                await page.waitForTimeout(500);
+                allure.attachment(`📸 Formulario Lleno (Antes de Submit)`, await page.screenshot({ fullPage: true }), "image/png");
+            }
+
+            const btn = page.locator('#submit_payment');
+            const isBlocked = await btn.isDisabled().catch(()=>true);
+            expect(isBlocked).toBe(false); // Debe estar habilitado para 13 chars
+            
+            // Hacer Click Real (No Forzado) ya que es Happy Path parcial
+            await btn.click();
+            await page.waitForTimeout(3000); // Esperar que cargue el Partner Checkout Modal
+            
+            await attachEvidence('PP - Checkout de Partner Abierto', page, `PP: ${limitePermitido}`, url);
             await context.close();
         });
 

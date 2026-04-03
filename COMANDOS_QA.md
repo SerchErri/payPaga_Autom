@@ -51,3 +51,7 @@ npm run qa -- --env=dev --report=true
 
 ---
 *Nota Técinica: El orden de los parámetros NO importa gracias al motor LookAround Regex integrado.*
+
+
+##### 5. Ejemplos creados por mi
+npm run qa -- --env=dev --module=payout --type=interactivity --country=EC --report=true

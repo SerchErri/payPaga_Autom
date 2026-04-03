@@ -13,7 +13,7 @@ describe(`[E2E UI] Validaciones Interactivas Merchant Portal EC [Ambiente: ${env
 
     beforeAll(async () => {
         browser = await chromium.launch({ headless: true });
-        context = await browser.newContext({ locale: 'es-ES' });
+        context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
         sharedPage = await context.newPage();
         
         // Timeout general más estricto
@@ -146,6 +146,13 @@ describe(`[E2E UI] Validaciones Interactivas Merchant Portal EC [Ambiente: ${env
     };
 
     const attemptSubmit = async (page) => {
+        if (allure && allure.attachment) {
+            try {
+                await page.waitForTimeout(500); 
+                const buffer = await page.screenshot({ fullPage: true });
+                allure.attachment("📸 Formulario Lleno (Antes de Enviar)", buffer, "image/png");
+            } catch(e) {}
+        }
         // Disparamos evento Blur (clickeando afuera) para forzar al Frontend a refrescar las validaciones en tiempo real
         await page.mouse.click(0, 0);
         await page.waitForTimeout(500);

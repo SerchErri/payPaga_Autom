@@ -12,7 +12,7 @@ describe(`[E2E UI] MERCHANT PORTAL EC: Creación de Payout [Ambiente: ${envConfi
     beforeAll(async () => {
         try {
             browser = await chromium.launch({ headless: true }); 
-            context = await browser.newContext({ locale: 'es-ES' });
+            context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
             page = await context.newPage();
             page.setDefaultTimeout(15000);
         } catch(e) { console.error("Fallo levantando Playwright", e); }
