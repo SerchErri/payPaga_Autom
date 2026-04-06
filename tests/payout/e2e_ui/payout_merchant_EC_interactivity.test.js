@@ -138,13 +138,14 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
         const randomCuenta = cuentasConfig[Math.floor(Math.random() * cuentasConfig.length)];
 
         await page.getByLabel('País *').selectOption('EC').catch(()=>null);
+        await page.waitForTimeout(2000); // ⏳ ESPERA A QUE CARGUE LA LISTA DE BANCOS 
         await typeSafe(page, { name: 'Monto *' }, '100.00');
         await typeSafe(page, { name: 'Nombre*' }, 'Sergio');
         await typeSafe(page, { name: 'Apellido*' }, 'Errigo');
         await page.getByLabel('Tipo de Documento*').selectOption('CI').catch(()=>null);
         await typeSafe(page, { name: 'Número de Documento*' }, '1710034065');
-        await page.getByLabel('Banco*').selectOption(randomBanco).catch(()=>null);
-        await page.getByLabel('Tipo de Cuenta*').selectOption(randomCuenta).catch(()=>null);
+        try { await page.getByLabel('Banco*').selectOption(randomBanco, {timeout:3000}); } catch(e) { await page.getByLabel('Banco*').selectOption({index:1}).catch(()=>null); }
+        try { await page.getByLabel('Tipo de Cuenta*').selectOption(randomCuenta, {timeout:3000}); } catch(e) { await page.getByLabel('Tipo de Cuenta*').selectOption({index:1}).catch(()=>null); }
         await typeSafe(page, { name: 'Número de Cuenta*' }, '12345678961');
     };
 
@@ -180,6 +181,14 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
         
         // Dar tiempo a la creación (Redirección o mensaje verde de éxito)
         await page.waitForTimeout(4000); 
+    };
+
+    const checkSystemDefect = (page, r, testScenario) => {
+        const urlCambio = !page.url().includes('create') && !page.url().includes('create-payment');
+        const isExito = r.errorVisualExtraido.toLowerCase().includes('éxito') || r.errorVisualExtraido.toLowerCase().includes('exito') || r.errorVisualExtraido.toLowerCase().includes('success');
+        if (urlCambio || isExito) {
+            throw new Error(`\n\n🚨 DEFECTO CRITICO DEL SISTEMA 🚨\nEl sistema permitió crear la transacción exitosamente con datos INVÁLIDOS.\nEscenario: ${testScenario}\nURL Actual: ${page.url()}\n\n`);
+        }
     };
 
     // ================================================================
@@ -281,6 +290,15 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
             await fillBaseForm(sharedPage);
             const selector = sharedPage.getByLabel('Tipo de Documento*').first();
             const textoDropdown = await selector.innerText();
+            if (allure && allure.attachment) {
+                try {
+                    await selector.click();
+                    await sharedPage.waitForTimeout(500);
+                    const buffer = await sharedPage.screenshot({ fullPage: true });
+                    allure.attachment("📸 Evidencia Dropdown Documentos (Sin DL)", buffer, "image/png");
+                    await sharedPage.mouse.click(0, 0); 
+                } catch(e) {}
+            }
             expect(textoDropdown.includes('DL')).toBe(false); 
         });
 
@@ -290,6 +308,7 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
             await typeSafe(sharedPage, { name: 'Número de Documento*' }, '171003406'); 
             await attemptSubmit(sharedPage); 
             const r = await attachEvidence('CI - 9 Digitos', sharedPage, "Documento: '171003406'");
+            checkSystemDefect(sharedPage, r, '3.1. CI: Faltan Caracteres (9 Digitos)');
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
@@ -323,6 +342,7 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
             await typeSafe(sharedPage, { name: 'Número de Documento*' }, 'A1B2C3D4E5QW9X'); 
             await attemptSubmit(sharedPage); 
             const r = await attachEvidence('PP - 14 Digitos', sharedPage, "Documento: 'A1B2C3D4E5QW9X'");
+            checkSystemDefect(sharedPage, r, '3.4. PP: Falla Desborde (14 Digitos)');
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
     });

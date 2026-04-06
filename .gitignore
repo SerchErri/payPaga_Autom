@@ -22,3 +22,6 @@ lerna-debug.log*
 .eslintcache
 .stylelintcache
 .prettiercache
+
+# Base de Conocimiento QA y Documentación Confidencial (No subir a Git)
+_qa_docs/

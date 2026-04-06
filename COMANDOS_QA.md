@@ -55,3 +55,7 @@ npm run qa -- --env=dev --report=true
 
 ##### 5. Ejemplos creados por mi
 npm run qa -- --env=dev --module=payout --type=interactivity --country=EC --report=true
+
+npm run qa -- --env=dev --module=payin --type=interactivity --country=EC --report=true
+
+
