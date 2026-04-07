@@ -203,10 +203,16 @@ describe(`[H2H Ecuador] Automatización Senior QA - Pay-In [Ambiente: ${envConfi
             const res = await runFirstNameTest('First Name 1 Char', "A");
             expect(res.status).toBeDefined();
         });
-        test('3.7. First Name: Límite Masivo (255 Chars)', async () => {
-            const nameGigante = "A".repeat(255);
-            const res = await runFirstNameTest('First Name Masivo 255', nameGigante);
+        test('3.7. First Name: Boundary Largo Exacto (51 Chars) [Fallo]', async () => {
+            const nameGigante = "A".repeat(51);
+            const res = await runFirstNameTest('First Name Boundary 51', nameGigante);
             expect([400, 422]).toContain(res.status);
+        });
+
+        test('3.7.1. First Name: Boundary Valido Máximo (50 Chars) [Exitoso]', async () => {
+            const nameMaximoPermitido = "A".repeat(50);
+            const res = await runFirstNameTest('First Name Boundary 50 Valido', nameMaximoPermitido);
+            expect([200, 201]).toContain(res.status);
         });
 
         // --- Validaciones LAST NAME ---
@@ -220,10 +226,16 @@ describe(`[H2H Ecuador] Automatización Senior QA - Pay-In [Ambiente: ${envConfi
             const res = await runLastNameTest('Last Name 1 Char', "A");
             expect(res.status).toBeDefined();
         });
-        test('3.14. Last Name: Límite Masivo (255 Chars)', async () => {
-            const nameGigante = "A".repeat(255);
-            const res = await runLastNameTest('Last Name Masivo 255', nameGigante);
+        test('3.14. Last Name: Boundary Largo Exacto (51 Chars) [Fallo]', async () => {
+            const nameGigante = "A".repeat(51);
+            const res = await runLastNameTest('Last Name Boundary 51', nameGigante);
             expect([400, 422]).toContain(res.status);
+        });
+
+        test('3.14.1. Last Name: Boundary Valido Máximo (50 Chars) [Exitoso]', async () => {
+            const nameMaximoPermitido = "A".repeat(50);
+            const res = await runLastNameTest('Last Name Boundary 50 Valido', nameMaximoPermitido);
+            expect([200, 201]).toContain(res.status);
         });
     });
 

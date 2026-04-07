@@ -177,13 +177,22 @@ describe(`[E2E UI] Validaciones Interactivas Merchant Portal EC [Ambiente: ${env
             expect(fueFrenado).toBe(true);  
         });
 
-        test('1.2. First Name: Boundary Largo (55 Letras)', async () => {
+        test('1.2. First Name: Boundary Largo (51 Letras)', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, '#first_name', 'A'.repeat(55)); 
+            await typeSafe(sharedPage, '#first_name', 'A'.repeat(51)); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('FN - Largo (55L)', sharedPage, "First Name: 'A'x55");
+            const r = await attachEvidence('FN - Largo (51L)', sharedPage, "First Name: 'A'x51");
             const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
             expect(fueFrenado).toBe(true);
+        });
+
+        test('1.2.1. First Name: Boundary Valido Máximo (50 Letras)', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#first_name', 'A'.repeat(50)); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('FN - Limite (50L) Exitoso', sharedPage, "First Name: 'A'x50");
+            const avanzoSinFrenar = !r.isBotonBloqueado && !r.errorVisualExtraido.includes('[Nativo HTML5]');
+            expect(avanzoSinFrenar).toBe(true);
         });
 
         test('1.3. First Name: Falla Regex por Números', async () => {
@@ -225,13 +234,22 @@ describe(`[E2E UI] Validaciones Interactivas Merchant Portal EC [Ambiente: ${env
             expect(fueFrenado).toBe(true);
         });
 
-        test('2.2. Last Name: Boundary Largo (>50 Letras)', async () => {
+        test('2.2. Last Name: Boundary Largo (51 Letras)', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, '#last_name', 'B'.repeat(55)); 
+            await typeSafe(sharedPage, '#last_name', 'B'.repeat(51)); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('LN - Largo (55L)', sharedPage, "Last Name: 'B'x55");
+            const r = await attachEvidence('LN - Largo (51L)', sharedPage, "Last Name: 'B'x51");
             const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
             expect(fueFrenado).toBe(true);
+        });
+
+        test('2.2.1. Last Name: Boundary Valido Máximo (50 Letras)', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#last_name', 'B'.repeat(50)); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('LN - Limite (50L) Exitoso', sharedPage, "Last Name: 'B'x50");
+            const avanzoSinFrenar = !r.isBotonBloqueado && !r.errorVisualExtraido.includes('[Nativo HTML5]');
+            expect(avanzoSinFrenar).toBe(true);
         });
 
         test('2.3. Last Name: Falla Regex por Números', async () => {
