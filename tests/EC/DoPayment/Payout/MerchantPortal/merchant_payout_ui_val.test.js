@@ -97,7 +97,7 @@ describe(`[EC] [DoPayment] [Payout] [MerchantPortal] [DEV] Validation Suite`, ()
         
         let isBotonBloqueadoOverride = false;
         if (!page.url().includes('create') && !page.url().includes('create-payment')) {
-             isBotonBloqueadoOverride = true; 
+             isBotonBloqueadoOverride = false; // El flujo avanzó con éxito, sin bloqueo
         }
         
         if (extractedTexts.length > 0) {
@@ -105,9 +105,11 @@ describe(`[EC] [DoPayment] [Payout] [MerchantPortal] [DEV] Validation Suite`, ()
         }
         
         let isBotonBloqueado = isBotonBloqueadoOverride;
-        if (!isBotonBloqueado) {
+        if (!isBotonBloqueado && (page.url().includes('create') || page.url().includes('create-payment'))) {
             const btnSave = page.getByRole('button', { name: 'Crear Pago' }).first();
             isBotonBloqueado = await btnSave.isDisabled().catch(()=>true);
+        } else if (!page.url().includes('create') && !page.url().includes('create-payment')) {
+            isBotonBloqueado = false;
         }
         
         const auditLog = {

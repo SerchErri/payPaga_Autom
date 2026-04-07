@@ -1,6 +1,6 @@
 const { chromium } = require('playwright');
 const allure = require('allure-js-commons');
-const envConfig = require('../../../utils/envConfig');
+const envConfig = require('../../../../../utils/envConfig');
 
 // Tiempo global amplio porque es un flujo larguísimo de front-end
 jest.setTimeout(1800000);

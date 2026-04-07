@@ -3,7 +3,7 @@ const allure = require('allure-js-commons');
 const { getAccessToken } = require('../../utils/authHelper');
 const envConfig = require('../../utils/envConfig');
 
-describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 
     test('Flujo Completo: Autenticación -> Configuración EC (GET) -> Creación de Pay-In (POST)', async () => {
         // ============================================================================== //
@@ -15,7 +15,7 @@ describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Ambiente: ${envConfig
         // 2. OBTENER INFORMACIÓN DEL MÉTODO DE PAGO para ECUADOR (EC) 
         // ============================================================================== //
         const configUrl = `${envConfig.BASE_URL}/v2/transactions/pay-in/config?country=EC`;
-        
+
         const configResponse = await axios.get(configUrl, {
             headers: {
                 'DisablePartnerMock': 'true',
@@ -31,8 +31,8 @@ describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Ambiente: ${envConfig
 
         if (allure && allure.attachment) {
             await allure.attachment(
-                `Paso 2 - Respuesta Config EC [${envConfig.currentEnvName.toUpperCase()}]`, 
-                JSON.stringify(configResponse.data, null, 2), 
+                `Paso 2 - Respuesta Config EC [${envConfig.currentEnvName.toUpperCase()}]`,
+                JSON.stringify(configResponse.data, null, 2),
                 "application/json"
             );
         }
@@ -41,7 +41,7 @@ describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Ambiente: ${envConfig
         // 3. CREACIÓN DEL PAY-IN EC 
         // ============================================================================== //
         const createPayinUrl = `${envConfig.BASE_URL}/v2/transactions/pay-in`;
-        
+
         const referenceId = `EC-test-${Date.now()}`;
         const payload = {
             "amount": 10000.00,
@@ -75,23 +75,23 @@ describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Ambiente: ${envConfig
 
         if (allure && allure.attachment) {
             await allure.attachment(
-                 `Paso 3 - Payload POST EC Enviado [${envConfig.currentEnvName.toUpperCase()}]`, 
-                 JSON.stringify(payload, null, 2), 
-                 "application/json"
+                `Paso 3 - Payload POST EC Enviado [${envConfig.currentEnvName.toUpperCase()}]`,
+                JSON.stringify(payload, null, 2),
+                "application/json"
             );
         }
 
         if (allure && allure.attachment) {
             const trans_id = postResponse.data.transaction_id || postResponse.data.id || 'No Asignado';
-            
+
             await allure.attachment(
-                 `Paso 3 - RESPUESTA BACKEND EC (Transaction ID: ${trans_id})`, 
-                 JSON.stringify({ 
+                `Paso 3 - RESPUESTA BACKEND EC (Transaction ID: ${trans_id})`,
+                JSON.stringify({
                     transaction_id: trans_id,
-                    merchant_reference_enviado: referenceId, 
-                    respuesta_completa_del_backend: postResponse.data 
-                 }, null, 2), 
-                 "application/json"
+                    merchant_reference_enviado: referenceId,
+                    respuesta_completa_del_backend: postResponse.data
+                }, null, 2),
+                "application/json"
             );
         }
 

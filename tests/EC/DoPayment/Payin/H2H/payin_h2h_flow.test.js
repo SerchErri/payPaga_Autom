@@ -1,21 +1,20 @@
 const axios = require('axios');
 const allure = require('allure-js-commons');
-const { getAccessToken } = require('../../utils/authHelper');
-const envConfig = require('../../utils/envConfig');
+const { getAccessToken } = require('../../../../../utils/authHelper');
+const envConfig = require('../../../../../utils/envConfig');
 
-describe(`Transacciones Pay-In (Argentina) - API de Paypaga [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 
-    test('Flujo Completo: Autenticación -> Configuración (GET) -> Creación de Pay-In (POST)', async () => {
+    test('Flujo Completo: Autenticación -> Configuración EC (GET) -> Creación de Pay-In (POST)', async () => {
         // ============================================================================== //
-        // 1. PASO DE AUTORIZACIÓN (Helper totalmente autogestionado por envConfig.js)
+        // 1. PASO DE AUTORIZACIÓN (Helper auto-gestiona el entorno)
         // ============================================================================== //
         const freshToken = await getAccessToken();
 
         // ============================================================================== //
-        // 2. OBTENER INFORMACIÓN DEL MÉTODO DE PAGO 
+        // 2. OBTENER INFORMACIÓN DEL MÉTODO DE PAGO para ECUADOR (EC) 
         // ============================================================================== //
-        // Obtenemos dinámicamente la base del endpoint elegida
-        const configUrl = `${envConfig.BASE_URL}/v2/transactions/pay-in/config?country=AR`;
+        const configUrl = `${envConfig.BASE_URL}/v2/transactions/pay-in/config?country=EC`;
 
         const configResponse = await axios.get(configUrl, {
             headers: {
@@ -26,36 +25,38 @@ describe(`Transacciones Pay-In (Argentina) - API de Paypaga [Amb: ${envConfig.cu
         });
 
         if (configResponse.status !== 200) {
-            console.error('El endpoint del GET Config falló:', JSON.stringify(configResponse.data, null, 2));
+            console.error('El endpoint del GET Config EC falló:', JSON.stringify(configResponse.data, null, 2));
         }
         expect(configResponse.status).toBe(200);
 
         if (allure && allure.attachment) {
             await allure.attachment(
-                "Paso 2 - Respuesta de configuraciones requeridas AR (GET)",
+                `Paso 2 - Respuesta Config EC [${envConfig.currentEnvName.toUpperCase()}]`,
                 JSON.stringify(configResponse.data, null, 2),
                 "application/json"
             );
         }
 
         // ============================================================================== //
-        // 3. CREACIÓN DEL PAY-IN (Cumpliendo el formato exigido)
+        // 3. CREACIÓN DEL PAY-IN EC 
         // ============================================================================== //
         const createPayinUrl = `${envConfig.BASE_URL}/v2/transactions/pay-in`;
 
-        const referenceId = `D8xohvYrUQlVfVwU-${Date.now()}`;
-
+        const referenceId = `EC-test-${Date.now()}`;
         const payload = {
-            "amount": 1000.00,
-            "country": "AR",
-            "currency": "ARS",
-            "payment_method": "cvu",
+            "amount": 10000.00,
+            "country": "EC",
+            "currency": "USD",
+            "payment_method": "bank_transfer",
             "merchant_transaction_reference": referenceId,
-            "merchant_customer_id": envConfig.FRONTEND_PARAMS.email, // Email provisto por ambiente
+            "merchant_return_url": `${envConfig.BASE_URL}/pay/completed`,
+            "merchant_customer_id": envConfig.FRONTEND_PARAMS.email,
             "fields": {
                 "first_name": "Sergio",
-                "last_name": "Aut Test",
-                "document_number": "20-27510579-2"
+                "last_name": "Testing",
+                "document_number": "1710034065",
+                "document_type": "CI",
+                "email": "perfecto@allure.com"
             }
         };
 
@@ -69,12 +70,12 @@ describe(`Transacciones Pay-In (Argentina) - API de Paypaga [Amb: ${envConfig.cu
         });
 
         if (postResponse.status !== 200 && postResponse.status !== 201) {
-            console.error('El endpoint devolvió error al intentar crear Pay-in:', JSON.stringify(postResponse.data, null, 2));
+            console.error(`El endpoint devolvió error al intentar crear Pay-in EC en ${envConfig.currentEnvName.toUpperCase()}:`, JSON.stringify(postResponse.data, null, 2));
         }
 
         if (allure && allure.attachment) {
             await allure.attachment(
-                "Paso 3 - Payload POST AR Enviado (Datos Random)",
+                `Paso 3 - Payload POST EC Enviado [${envConfig.currentEnvName.toUpperCase()}]`,
                 JSON.stringify(payload, null, 2),
                 "application/json"
             );
@@ -84,7 +85,7 @@ describe(`Transacciones Pay-In (Argentina) - API de Paypaga [Amb: ${envConfig.cu
             const trans_id = postResponse.data.transaction_id || postResponse.data.id || 'No Asignado';
 
             await allure.attachment(
-                `Paso 3 - RESPUESTA BACKEND (Transaction ID: ${trans_id})`,
+                `Paso 3 - RESPUESTA BACKEND EC (Transaction ID: ${trans_id})`,
                 JSON.stringify({
                     transaction_id: trans_id,
                     merchant_reference_enviado: referenceId,

@@ -3,7 +3,7 @@ const allure = require('allure-js-commons');
 const { getAccessToken } = require('../../utils/authHelper');
 const envConfig = require('../../utils/envConfig');
 
-describe(`Configuración Pay-In (Payment Config ECUADOR) - API de Paypaga [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`Configuración Pay-In (Payment Config ECUADOR) - API de Paypaga [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 
     let freshToken = '';
     const BASE_CONFIG_URL = `${envConfig.BASE_URL}/v2/transactions/pay-in/config`;
@@ -18,7 +18,7 @@ describe(`Configuración Pay-In (Payment Config ECUADOR) - API de Paypaga [Ambie
 
     test(`Llamada EXITOSA a la configuración de Pay-In para Ecuador (country=EC)`, async () => {
         const url = `${BASE_CONFIG_URL}?country=EC`;
-        
+
         const response = await axios.get(url, {
             headers: {
                 'DisablePartnerMock': 'true',
@@ -37,7 +37,7 @@ describe(`Configuración Pay-In (Payment Config ECUADOR) - API de Paypaga [Ambie
 
     test('Testing Negativo: Forzar error omitiendo el parámetro obligatorio [country]', async () => {
         const url = `${BASE_CONFIG_URL}`;
-        
+
         const response = await axios.get(url, {
             headers: {
                 'DisablePartnerMock': 'true',
@@ -55,7 +55,7 @@ describe(`Configuración Pay-In (Payment Config ECUADOR) - API de Paypaga [Ambie
 
     test('Testing Negativo: Forzar error enviando un [country] ficticio o no habilitado', async () => {
         const url = `${BASE_CONFIG_URL}?country=ZZZ`;
-        
+
         const response = await axios.get(url, {
             headers: {
                 'DisablePartnerMock': 'true',
@@ -73,7 +73,7 @@ describe(`Configuración Pay-In (Payment Config ECUADOR) - API de Paypaga [Ambie
 
     test('Testing Negativo: Intentar acceder a la base Config EC SIN Authorization Token', async () => {
         const url = `${BASE_CONFIG_URL}?country=EC`;
-        
+
         const response = await axios.get(url, {
             headers: {
                 'DisablePartnerMock': 'true'

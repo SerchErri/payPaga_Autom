@@ -59,7 +59,13 @@ describe(`[EC] [DoPayment] [Payin] [PayURL] [DEV] Validation Suite`, () => {
             errorVisualExtraido = [...new Set(extractedTexts)].join(" | ");
         }
         
-        const isBotonBloqueado = await page.locator('#submit_payment').isDisabled().catch(()=>true);
+        let isBotonBloqueado = false;
+        if (page.url() === finalUrl) {
+            isBotonBloqueado = await page.locator('#submit_payment').isDisabled().catch(()=>true);
+        } else {
+            // Si la URL cambió, significa que el checkout procesó y redirigió (Éxito Rotundo)
+            isBotonBloqueado = false;
+        }
         
         const auditLog = {
             Destino: finalUrl,
@@ -126,8 +132,8 @@ describe(`[EC] [DoPayment] [Payin] [PayURL] [DEV] Validation Suite`, () => {
             } catch(e) {}
         }
         const btn = page.locator('#submit_payment');
-        await btn.evaluate(node => node.disabled = false).catch(()=>null);
-        await btn.click({ force: true }).catch(()=>null);
+        // Se hace clic de forma natural, sin forzar enablement
+        await btn.click({ timeout: 1000 }).catch(()=>null);
         await page.waitForTimeout(1000); 
     };
 
@@ -156,8 +162,7 @@ describe(`[EC] [DoPayment] [Payin] [PayURL] [DEV] Validation Suite`, () => {
             const { url, page, context } = await generarYPrepararCheckout();
             await fillBaseForm(page);
             await typeSafe(page, '#first_name', 'A'.repeat(50)); 
-            
-            await page.locator('#submit_payment').evaluate(node => node.disabled = false).catch(()=>null);
+            // Sin hack `node.disabled = false`
             await page.locator('#submit_payment').click();
             await page.waitForTimeout(3000); 
             
@@ -225,8 +230,7 @@ describe(`[EC] [DoPayment] [Payin] [PayURL] [DEV] Validation Suite`, () => {
             const { url, page, context } = await generarYPrepararCheckout();
             await fillBaseForm(page);
             await typeSafe(page, '#last_name', 'B'.repeat(50)); 
-            
-            await page.locator('#submit_payment').evaluate(node => node.disabled = false).catch(()=>null);
+            // Sin hack `node.disabled = false`
             await page.locator('#submit_payment').click();
             await page.waitForTimeout(3000); 
             

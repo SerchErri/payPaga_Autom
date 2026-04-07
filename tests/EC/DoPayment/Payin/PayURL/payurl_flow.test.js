@@ -1,7 +1,7 @@
 const axios = require('axios');
 const allure = require('allure-js-commons');
-const envConfig = require('../../../utils/envConfig');
-const { getAccessToken } = require('../../../utils/authHelper');
+const envConfig = require('../../../../../utils/envConfig');
+const { getAccessToken } = require('../../../../../utils/authHelper');
 
 describe(`Crear Link de Pago (PayUrl) EC [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 

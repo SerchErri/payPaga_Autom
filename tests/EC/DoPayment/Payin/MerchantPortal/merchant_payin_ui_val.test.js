@@ -83,8 +83,10 @@ describe(`[EC] [DoPayment] [Payin] [MerchantPortal] [DEV] Validation Suite`, () 
              const bodyText = await page.innerText('body').catch(()=>"");
              if (bodyText.toLowerCase().includes('no es ecuatoriano') || bodyText.toLowerCase().includes('ecuatoriana')) {
                  extractedTexts.push(`[VALIDACION EN OTRA PÁGINA]: Documento mitigado exitosamente.`);
+             } else {
+                 // Si salió exitosamente de create, no hubo bloqueo de UI 
+                 isBotonBloqueadoOverride = false; 
              }
-             isBotonBloqueadoOverride = true; 
         }
         
         if (extractedTexts.length > 0) {
@@ -95,6 +97,8 @@ describe(`[EC] [DoPayment] [Payin] [MerchantPortal] [DEV] Validation Suite`, () 
         if (!isBotonBloqueado && page.url().includes('create')) {
             const btnSave = page.locator('button:has-text("Crear Enlace de Pago")').first();
             isBotonBloqueado = await btnSave.isDisabled().catch(()=>true);
+        } else if (!page.url().includes('create')) {
+            isBotonBloqueado = false;
         }
         
         const auditLog = {
@@ -141,8 +145,20 @@ describe(`[EC] [DoPayment] [Payin] [MerchantPortal] [DEV] Validation Suite`, () 
         await page.waitForTimeout(500);
 
         const btn = page.locator('button:has-text("Crear Enlace de Pago")').first();
-        await btn.click({ timeout: 500 }).catch(()=>null);
+        await btn.click({ timeout: 1000 }).catch(()=>null);
         await page.waitForTimeout(1000); 
+    };
+
+    const attemptHappySubmit = async (page) => {
+        if (allure && allure.attachment) {
+            try {
+                await page.waitForTimeout(500); 
+                allure.attachment("📸 Formulario Lleno OK", await page.screenshot({ fullPage: true }), "image/png");
+            } catch(e) {}
+        }
+        const btn = page.locator('button:has-text("Crear Enlace de Pago")').first();
+        await btn.click();
+        await page.waitForTimeout(4000); 
     };
 
     describe('1. Suite UI: Nombres (First Name)', () => {
@@ -165,7 +181,7 @@ describe(`[EC] [DoPayment] [Payin] [MerchantPortal] [DEV] Validation Suite`, () 
         test('1.2.1. First Name: Máximo (50 Letras) [Éxito]', async () => {
             await fillBaseForm(sharedPage);
             await typeSafe(sharedPage, '#first_name', 'A'.repeat(50)); 
-            await attemptSubmit(sharedPage); 
+            await attemptHappySubmit(sharedPage); 
             const r = await attachEvidence('FN Limite 50 Exitoso', sharedPage, "FN: 50");
             expect(!r.isBotonBloqueado && !r.errorVisualExtraido.includes('HTML5')).toBe(true);
         });
@@ -189,7 +205,7 @@ describe(`[EC] [DoPayment] [Payin] [MerchantPortal] [DEV] Validation Suite`, () 
         test('1.5. First Name: Feliz Apóstrofe, Tildes [Éxito]', async () => {
             await fillBaseForm(sharedPage);
             await typeSafe(sharedPage, '#first_name', "O'Connor ñÑ áéí"); 
-            await attemptSubmit(sharedPage); 
+            await attemptHappySubmit(sharedPage); 
             const r = await attachEvidence('FN Apóstrofes y Feliz', sharedPage, "FN: O'Connor...");
             expect(r.isBotonBloqueado).toBe(false); 
         });
@@ -215,7 +231,7 @@ describe(`[EC] [DoPayment] [Payin] [MerchantPortal] [DEV] Validation Suite`, () 
         test('2.2.1. Last Name: Valido Máximo (50 Letras) [Éxito]', async () => {
             await fillBaseForm(sharedPage);
             await typeSafe(sharedPage, '#last_name', 'B'.repeat(50)); 
-            await attemptSubmit(sharedPage); 
+            await attemptHappySubmit(sharedPage); 
             const r = await attachEvidence('LN Limite 50 Exitoso', sharedPage, "LN: 50");
             expect(!r.isBotonBloqueado && !r.errorVisualExtraido.includes('HTML5')).toBe(true);
         });
@@ -231,7 +247,7 @@ describe(`[EC] [DoPayment] [Payin] [MerchantPortal] [DEV] Validation Suite`, () 
         test('2.4. Last Name: Feliz Guiones y Tildes [Éxito]', async () => {
             await fillBaseForm(sharedPage);
             await typeSafe(sharedPage, '#last_name', 'Torres-Gomez áé ñÑ'); 
-            await attemptSubmit(sharedPage); 
+            await attemptHappySubmit(sharedPage); 
             const r = await attachEvidence('LN Guiones Tildes', sharedPage, "LN: Torres-Gomez...");
             expect(!r.isBotonBloqueado && !r.errorVisualExtraido.includes('HTML5')).toBe(true);
         });
