@@ -1,9 +1,9 @@
 const axios = require('axios');
 const allure = require('allure-js-commons');
-const { getAccessToken } = require('../../../utils/authHelper');
-const envConfig = require('../../../utils/envConfig');
+const { getAccessToken } = require('../../../../../utils/authHelper');
+const envConfig = require('../../../../../utils/envConfig');
 
-describe(`[Payout H2H Ecuador] Camino Feliz y Saldo (available_for_payout) [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`[EC] [DoPayment] [Payout] [H2H] Camino Feliz y Saldo (available_for_payout) [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
     let token = '';
 
     beforeAll(async () => {
