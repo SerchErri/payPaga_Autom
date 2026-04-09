@@ -86,21 +86,32 @@ describe(`[E2E UI] FAST FLOW - MERCHANT PORTAL EC: Solo Creación de Payout [Amb
         await attachScreenshot('Formulario Listo');
 
         // =========================================================
-        // 4. CREAR Y EXTRAER ID TRANSACCIÓN PORM API INTERCEPTOR
+        // 4. CREAR Y EXTRAER ID TRANSACCIÓN
         // =========================================================
-        // Interceptar la respuesta del request HTTP interno de React para agarrar el ID con precisión del 100%
-        const responsePromise = page.waitForResponse(response => response.url().includes('pay-out') && [200, 201].includes(response.status()), { timeout: 20000 }).catch(()=>null);
         await page.getByRole('button', { name: 'Crear Pago' }).click();
 
-        let generatedTxId = "NO_ENCONTRADO";
-        const apiResponse = await responsePromise;
-        if(apiResponse) {
-            const respBody = await apiResponse.json().catch(()=>({}));
-            generatedTxId = respBody.transaction_id || respBody.id || respBody.reference || "ID_RESCATADO_DESCONOCIDO";
-        }
+        // Esperamos agresivamente a que el sistema agregue la fila a la tabla UI
+        await page.waitForTimeout(6000); 
+
+        // Raspamos el ID buscando en la tabla visible
+        const possibleId = await page.evaluate(() => {
+            const uuidRegex = /[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/;
+            const elements = document.body.innerText.match(uuidRegex);
+            return elements ? elements[0] : null;
+        });
+
+        const generatedTxId = possibleId || "NO_ENCONTRADO";
         
-        await page.waitForTimeout(3000); 
-        await attachScreenshot('Payout Generado Exitosamente');
+        // Click a la primera fila para abrir el panel/modal de detalles de esa transacción
+        const firstRow = page.locator('table tbody tr').first();
+        await firstRow.click({ force: true }).catch(()=>null);
+        await page.waitForTimeout(2000); // Dar tiempo a que el panel abra
+
+        if(allure && allure.attachment){
+            // Capturamos explícitamente viewport para atrapar el modal/drawer y no la grilla vertical "larguísima"
+            const vpBuffer = await page.screenshot({ fullPage: false });
+            await allure.attachment(`📸 Evidencia Visual: Payout EC Detalles Singulares`, vpBuffer, "image/png");
+        }
 
         console.log(`\n======================================================`);
         console.log(`✅ TEST RÁPIDO: Payout EC Creado`);
