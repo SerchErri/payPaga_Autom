@@ -1,6 +1,7 @@
 const { chromium } = require('playwright');
 const allure = require('allure-js-commons');
 const envConfig = require('../../../../../utils/envConfig');
+const { loginAndCaptureDashboard, fastAdminApprove } = require('../../../../../utils/uiBalanceHelper');
 
 // Tiempo global amplio porque es un flujo larguísimo de front-end
 jest.setTimeout(1800000);
@@ -10,12 +11,14 @@ describe(`MERCHANT PORTAL EC: Creación de Payment Link en [Amb: ${envConfig.cur
     let browser;
     let context;
     let page;
+    let initialBalances = {};
+    let payinTestAmount = 100;
 
     beforeAll(async () => {
         try {
             // Se lanza el navegador
             browser = await chromium.launch({ headless: true });
-            context = await browser.newContext({ locale: 'es-ES' });
+            context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
             page = await context.newPage();
         } catch (e) { console.error("Fallo levantando Playwright", e); }
     });
@@ -40,28 +43,13 @@ describe(`MERCHANT PORTAL EC: Creación de Payment Link en [Amb: ${envConfig.cur
         }
     };
 
-    test('Flujo Completo: Login -> Rellenar Formulario -> Validar Tabla -> Interceptar Safetypay', async () => {
+    test('Flujo Completo: UI Saldos -> Rellenar Formulario -> Validar Tabla -> Interceptar Safetypay', async () => {
         // =========================================================
-        // 1. INICIO DE SESIÓN EN PORTAL MERCHANT
+        // 1. INICIO DE SESIÓN Y REGISTRO DE SALDOS INICIALES
         // =========================================================
-        let baseURL = envConfig.BASE_URL; // e.g., api.v2.dev... the user said merchant.v2.dev.paypaga.com
-        const domainRoot = baseURL.replace("api", "merchant");
-        const loginUrl = `${domainRoot}/login`;
+        initialBalances = await loginAndCaptureDashboard(page, allure, true);
+        console.log("📈 SALDOS INICIALES PAYIN (UI):", initialBalances);
 
-        await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
-
-        // Esperamos a que despierte el React/Vue del input
-        await page.waitForSelector('#identifier', { timeout: 15000 });
-        await typeSafe('#identifier', 'automation.qa.v1@gmail.com');
-        await typeSafe('#password', 'Sergio@1234');
-
-        // Clic en Submit de login (Forzamos desbloqueo porque React puede demorar en habilitarlo tras typeSafe)
-        const btnLogin = page.locator('button:has-text("Iniciar sesión")').first();
-        await btnLogin.evaluate(node => node.disabled = false).catch(() => null);
-        await btnLogin.click({ force: true });
-
-        // Esperamos aterrizar en el Dashboard Principal
-        await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => null);
         await attachScreenshot('Dashboard Merchant Tras Login');
 
         // =========================================================
@@ -167,5 +155,54 @@ describe(`MERCHANT PORTAL EC: Creación de Payment Link en [Amb: ${envConfig.cur
         }
 
         expect(wasMatched).toBe(true); // ¡Si no aparece el precio en la Pasarela, esto estallará en ROJO!
+
+        // =========================================================
+        // 6. BUSCAR TRANSACCIÓN EN GRILLA, EXTRAER ID Y APROBAR
+        // =========================================================
+        // Volvemos a la pestaña original de Merchant Portal
+        await page.bringToFront();
+
+        const btnTransacciones = page.getByRole('link', { name: ' Transacciones ' }).first();
+        await btnTransacciones.click({ force: true }).catch(()=>null);
+        await page.waitForTimeout(1000);
+        
+        const btnEntradas = page.getByRole('link', { name: 'Transacciones de Entrada' }).first();
+        await btnEntradas.click({ force: true }).catch(()=>null);
+
+        // Esperamos agresivamente a que el sistema agregue la fila a la tabla UI
+        await page.waitForTimeout(4000); 
+
+        // Raspamos el ID buscando en la tabla visible
+        const generatedTxId = await page.evaluate(() => {
+            const uuidRegex = /[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/;
+            const elements = document.body.innerText.match(uuidRegex);
+            return elements ? elements[0] : null;
+        });
+
+        if (!generatedTxId) {
+            console.warn("⚠️ No se encontró UUID en la tabla de Transacciones de Entrada. Puede que la inserción se demore.");
+        } else {
+            console.log(`\n🔗 PayIn Transaction ID Encontrado en Grilla: ${generatedTxId}`);
+            if (allure && allure.attachment) allure.attachment('PayIn ID', generatedTxId, 'text/plain');
+            
+            // Aprobar forzosamente por Admin
+            await fastAdminApprove(page, generatedTxId, 'pay-in', allure);
+        }
+
+        // =========================================================
+        // 7. VOLVER AL DASHBOARD Y VALIDAR IMPACTO DE SALDOS
+        // =========================================================
+        const finalBalances = await loginAndCaptureDashboard(page, allure, false);
+        console.log("📈 SALDOS FINALES PAYIN TRAS APROBACIÓN:", finalBalances);
+
+        // De acuerdo al Excel: Initial + Payin = Sube
+        expect(finalBalances.available).toBeGreaterThan(initialBalances.available);
+        expect(finalBalances.volume).toBeGreaterThan(initialBalances.volume);
+        expect(finalBalances.fees !== initialBalances.fees).toBeTruthy();
+        expect(finalBalances.taxes !== initialBalances.taxes).toBeTruthy();
+        
+        if (allure && allure.attachment) {
+            await allure.attachment(`Comparativa PayIn EC`, JSON.stringify({ SALDOS_INICIALES: initialBalances, SALDOS_FINALES: finalBalances }, null, 2), "application/json");
+        }
     });
 });

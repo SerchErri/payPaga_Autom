@@ -24,7 +24,13 @@ try {
                 border: 1px solid #444 !important; 
                 padding: 10px !important;
                 border-radius: 4px !important;
+                border-radius: 4px !important;
             }
+            /* Sintaxis JSON super brillante (Colores vivos anti-ceguera para fondo calcín) */
+            .hljs-attr { color: #f2cc60 !important; font-weight: bold !important; } /* Keys Amarillos Fuerte */
+            .hljs-string { color: #7ee787 !important; } /* Strings Verdes Fluorescentes */
+            .hljs-number { color: #ff7b72 !important; font-weight: bold !important; } /* Números Coral/Casi Rojizos */
+            .hljs-literal, .hljs-keyword { color: #ff79c6 !important; font-weight: bold !important; } /* Booleans y Nulos en Fucsia brillante */
             .status-details { background-color: #1e1e1e !important; color: #e0e0e0 !important; }
             .test-result-status-details__message { background-color: #3a1c1c !important; color: #ff5252 !important; border-left: 4px solid #ff5252 !important; }
             /* Filtro para iconos y menús */

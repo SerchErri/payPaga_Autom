@@ -1,15 +1,41 @@
 const axios = require('axios');
 const allure = require('allure-js-commons');
+const { chromium } = require('playwright');
 const { getAccessToken } = require('../../../../../utils/authHelper');
 const envConfig = require('../../../../../utils/envConfig');
+const { loginAndCaptureDashboard, fastAdminApprove } = require('../../../../../utils/uiBalanceHelper');
 
-describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+jest.setTimeout(1800000); // 30 mins para UI operations
 
-    test('Flujo Completo: Autenticación -> Configuración EC (GET) -> Creación de Pay-In (POST)', async () => {
+describe(`[E2E Híbrido] Pay-In H2H Ecuador: API Generación + UI Validaciones [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+
+    let token = '';
+    let browser;
+    let context;
+    let page;
+    let initialBalances = {};
+    let payinAmountConfig = 15.55; // Monto pequeño para evadir límites diarios de validación
+
+    beforeAll(async () => {
+        token = await getAccessToken();
+        try {
+            browser = await chromium.launch({ headless: true });
+            context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
+            page = await context.newPage();
+            page.setDefaultTimeout(20000);
+        } catch (e) { console.error("Fallo levantando Playwright", e); }
+    });
+
+    afterAll(async () => {
+        if (browser) await browser.close();
+    });
+
+    test('Flujo Ómnicanal: Capturar Saldo UI -> Generar Backend H2H -> Inspeccionar Grilla -> Aprobar Admin', async () => {
         // ============================================================================== //
-        // 1. PASO DE AUTORIZACIÓN (Helper auto-gestiona el entorno)
+        // 1. CAPTURAR DASHBOARD Y SALDOS INICIALES
         // ============================================================================== //
-        const freshToken = await getAccessToken();
+        initialBalances = await loginAndCaptureDashboard(page, allure, true);
+        console.log("📈 SALDOS INICIALES PAYIN (UI):", initialBalances);
 
         // ============================================================================== //
         // 2. OBTENER INFORMACIÓN DEL MÉTODO DE PAGO para ECUADOR (EC) 
@@ -19,7 +45,7 @@ describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Amb: ${envConfig.curr
         const configResponse = await axios.get(configUrl, {
             headers: {
                 'DisablePartnerMock': 'true',
-                'Authorization': `Bearer ${freshToken}`
+                'Authorization': `Bearer ${token}`
             },
             validateStatus: () => true
         });
@@ -38,13 +64,13 @@ describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Amb: ${envConfig.curr
         }
 
         // ============================================================================== //
-        // 3. CREACIÓN DEL PAY-IN EC 
+        // 3. CREACIÓN DEL PAY-IN H2H (Directo a Servidor)
         // ============================================================================== //
         const createPayinUrl = `${envConfig.BASE_URL}/v2/transactions/pay-in`;
 
-        const referenceId = `EC-test-${Date.now()}`;
+        const referenceId = `EC-H2H-${Date.now()}`;
         const payload = {
-            "amount": 10000.00,
+            "amount": payinAmountConfig,
             "country": "EC",
             "currency": "USD",
             "payment_method": "bank_transfer",
@@ -64,7 +90,7 @@ describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Amb: ${envConfig.curr
             headers: {
                 'DisablePartnerMock': 'true',
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${freshToken}`
+                'Authorization': `Bearer ${token}`
             },
             validateStatus: () => true
         });
@@ -97,6 +123,59 @@ describe(`Transacciones Pay-In (Ecuador) - API de Paypaga [Amb: ${envConfig.curr
 
         expect([200, 201]).toContain(postResponse.status);
         expect(postResponse.data).toBeDefined();
+
+        const trID = postResponse.data.transaction_id || postResponse.data.id || 'No Asignado';
+
+        // ============================================================================== //
+        // 4. INSPECCIONAR GRILLA VISUALMENTE COMO EVIDENCIA
+        // ============================================================================== //
+        await page.bringToFront();
+
+        // En vez de recargar la SPA con goto, navegamos nativamente haciendo click (Evita el 404 del Router frontend)
+        const btnTransacciones = page.getByRole('link', { name: ' Transacciones ' }).first();
+        await btnTransacciones.click({ force: true }).catch(()=>null);
+        await page.waitForTimeout(1000);
+        
+        const btnEntradas = page.getByRole('link', { name: 'Transacciones de Entrada' }).first();
+        await btnEntradas.click({ force: true }).catch(()=>null);
+        
+        await page.waitForTimeout(8000); // Dar holgura a la carga de la tabla armada por React
+
+        // Si la tabla contiene el amount gigante, significa que cayó exitosamente a nivel UI
+        const tableContent = await page.locator('table').innerText().catch(async () => await page.innerText('body').catch(()=>""));
+        
+        console.log("=== DEBUG TABLA PAYIN H2H ===");
+        console.log(tableContent);
+        console.log("=============================");
+
+        const hasRenderedAmmount = tableContent.includes('15.55') || tableContent.includes('15,55');
+        expect(hasRenderedAmmount).toBe(true); // La UI procesó el webhook exitosamente
+
+        if (allure && allure.attachment) {
+            const tableSnap = await page.locator('table').screenshot({ timeout: 5000 }).catch(() => null);
+            if (tableSnap) await allure.attachment(`📸 Evidencia Visual Grilla: Transacción H2H aterrizó en UI`, tableSnap, "image/png");
+        }
+
+        // ============================================================================== //
+        // 5. ADMIN PORTAL (APROBACIÓN AGIL UI)
+        // ============================================================================== //
+        await fastAdminApprove(page, trID, 'pay-in', allure);
+
+        // ============================================================================== //
+        // 6. REGRESAR AL DASHBOARD Y VALIDAR IMPACTO
+        // ============================================================================== //
+        const finalBalances = await loginAndCaptureDashboard(page, allure, false);
+        console.log("📈 SALDOS FINALES PAYIN TRAS APROBACIÓN H2H:", finalBalances);
+
+        // Validaciones Tolerantes al Paralelismo
+        expect(finalBalances.available).toBeGreaterThan(initialBalances.available);
+        expect(finalBalances.volume).toBeGreaterThan(initialBalances.volume);
+        expect(finalBalances.fees !== initialBalances.fees).toBeTruthy();
+        expect(finalBalances.taxes !== initialBalances.taxes).toBeTruthy();
+
+        if (allure && allure.attachment) {
+            await allure.attachment(`Comparativa PayIn EC H2H`, JSON.stringify({ SALDOS_INICIALES: initialBalances, SALDOS_FINALES: finalBalances }, null, 2), "application/json");
+        }
     });
 
 });
