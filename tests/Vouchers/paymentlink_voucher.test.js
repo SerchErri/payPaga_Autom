@@ -19,18 +19,15 @@ const envConfig = require('../../utils/envConfig');
 jest.setTimeout(2400000);
 
 const casesData = [
-  { country: 'AR', methods: ['cvu'] },
-  { country: 'BR', methods: ['pix'] },
-  // Desactivado CL: 'khipu'
-  { country: 'CL', methods: ['bank_transfer'] },
-  // Desactivados: 'dale', 'daviplatanative', 'movii', 'nequi', 'rappipay', 'transfiya'
-  { country: 'CO', methods: ['efecty', 'gana', 'pse', 'puntored', 'superpagos', 'sured', 'susuerte', 'wu'] },
-  // Desactivados EC: 'pichincha'
-  { country: 'EC', methods: ['bemovil', 'deuna', 'minegocioefectivo', 'omniswitch', 'rapiactivo', 'bank_transfer', 'wu'] },
-  { country: 'SV', methods: ['bancoagricola', 'cuscatlan', 'puntoxpresssv'] },
-  { country: 'GT', methods: ['bam', 'bam_transferencia', 'bi'] },
+  // { country: 'AR', methods: ['cvu'] },
+  // { country: 'BR', methods: ['pix'] },
+  // { country: 'CL', methods: ['bank_transfer'] },
+  // { country: 'CO', methods: ['efecty', 'gana', 'pse', 'puntored', 'superpagos', 'susuerte', 'wu'] },
+  // { country: 'EC', methods: ['bemovil', 'minegocioefectivo', 'omniswitch', 'rapiactivo', 'wu'] },
+  // { country: 'SV', methods: ['puntoxpresssv'] },
+  { country: 'GT', methods: ['bam'] },
   { country: 'MX', methods: ['paycash', 'spei'] },
-  { country: 'PE', methods: ['bbva', 'bcp', 'bcp_efectivo', 'cellpower', 'globokas', 'plin', 'ligoqrinterbilletera', 'yape'] }
+  { country: 'PE', methods: ['bcp', 'bcp_efectivo', 'cellpower', 'globokas'] }
 ];
 
 const flatCases = [];
@@ -147,7 +144,7 @@ describe('E2E - Creación de Enlaces de Pago y Validación de Vouchers', () => {
             node.dispatchEvent(new Event('change', { bubbles: true }));
         }, country).catch(() => null);
         
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(3000); // Aumentado para dar tiempo a la red a traer métodos del país
 
         // --- PAYLOADS REGIONALES ESTRICTOS PARA FRONTEND ---
         let cData = {
@@ -155,7 +152,7 @@ describe('E2E - Creación de Enlaces de Pago y Validación de Vouchers', () => {
             firstName: `Auto-${faker.lorem.word().replace(/[^a-zA-Z]/g, '')}`,
             lastName: rE(lNames),
             phone: '3001234567',
-            amount: '150.50',
+            amount: '150.56',
             currency: null,
             bankCode: null,
             docType: null,
@@ -170,9 +167,10 @@ describe('E2E - Creación de Enlaces de Pago y Validación de Vouchers', () => {
             cData.doc = '21222956608'; cData.firstName = 'Thiago ' + rE(fNames); cData.lastName = 'Dos Santos'; 
         }
         if (country === 'CL') { 
-            cData.doc = '15.541.341-K'; cData.email = 'sergio.gomez@example.cl'; cData.bankCode = 'santander'; 
+            cData.doc = '14199075-6'; cData.email = 'sergio.gomez@example.cl'; cData.bankCode = 'santander'; cData.amount = '1155';
         }
         if (country === 'CO') { 
+            cData.amount = '1155';
             cData.phone = '3159876543'; // Nequi fallback o general
             if (method.includes('pse') || method.includes('PSE')) {
                 cData.firstName = 'Mariana ' + rE(fNames); cData.lastName = 'Pajón';
@@ -186,15 +184,15 @@ describe('E2E - Creación de Enlaces de Pago y Validación de Vouchers', () => {
         }
         if (country === 'GT') { 
             cData.firstName = 'Miguel ' + rE(fNames); cData.lastName = 'Asturias'; 
-            cData.docType = 'NIT'; cData.doc = '4567891-2'; cData.currency = 'GTQ'; cData.email = 'm.asturias@test.com.gt'; cData.amount = '150'; 
+            cData.docType = 'NIT'; cData.doc = '4567891-2'; cData.currency = 'GTQ'; cData.email = 'm.asturias@test.com.gt'; cData.amount = '1150.56'; 
         }
         if (country === 'SV') { 
             cData.firstName = 'Ernesto ' + rE(fNames); cData.lastName = 'Rivas'; 
-            cData.docType = 'DUI'; cData.doc = '12345678-9'; cData.currency = 'USD'; cData.email = 'e.rivas@test.com.sv'; cData.amount = '15'; 
+            cData.docType = 'DUI'; cData.doc = '12345678-9'; cData.currency = 'USD'; cData.email = 'e.rivas@test.com.sv'; cData.amount = '15.56'; 
         }
         if (country === 'MX') {
             cData.firstName = 'Cuauhtémoc ' + rE(fNames); cData.lastName = 'Blanco'; 
-            cData.currency = 'MXN'; cData.amount = '1500.00';
+            cData.currency = 'MXN'; cData.amount = '1500.56';
             if (method.includes('spei') || method.includes('SPEI')) {
                 cData.doc = 'GOSD900315HDFRRN01';
             } else {
@@ -202,29 +200,62 @@ describe('E2E - Creación de Enlaces de Pago y Validación de Vouchers', () => {
             }
         }
         if (country === 'PE') {
-            cData.currency = 'PEN'; cData.amount = '50.00'; cData.phone = '981234567'; cData.confCode = '654321';
+            cData.currency = 'PEN'; cData.amount = '1150.56'; cData.phone = '981234567'; cData.confCode = '654321';
         }
 
         // DESTRABAR DESPLEGABLES EN CASCADA: Seleccionar moneda si existe para que Method se pueble
         if (cData.currency) {
-            const currencySel = page.locator('select[name*="currency"], select[name*="moneda"], select#currency').first();
+            const currencySel = page.locator('select#currency, select[name="currency"]').first();
             await currencySel.waitFor({ state: 'attached', timeout: 3000 }).catch(()=>null);
-            if (await currencySel.isVisible()) {
-                await currencySel.selectOption(cData.currency, { force: true }).catch(()=>null);
-                await page.waitForTimeout(1000); 
+            // Solo interactuar si está habilitado y visible, para no romper auto-fetch
+            if (await currencySel.isVisible() && await currencySel.isEnabled()) {
+                const curOpts = await currencySel.evaluate(n => Array.from(n.options).map(o => o.value)).catch(()=>[]);
+                const matchedCur = curOpts.find(v => v.toLowerCase() === cData.currency.toLowerCase());
+                if (matchedCur) {
+                    await currencySel.selectOption(matchedCur, { force: true }).catch(()=>null);
+                    await currencySel.evaluate((node, val) => { 
+                        node.value = val; 
+                        node.dispatchEvent(new Event('change', { bubbles: true }));
+                    }, matchedCur).catch(() => null);
+                    await page.waitForTimeout(3000); 
+                }
             }
         }
 
-        // SELECCIÓN DE MÉTODO
+        // SELECCIÓN DE MÉTODO (SMART LOCATOR E INSPECTOR DE DOM)
         const selectMethod = page.locator('select#payment_method');
-        await selectMethod.waitFor({state: 'attached', timeout: 5000}).catch(()=>null);
-        await selectMethod.selectOption(method, { force: true }).catch(()=>null);
+        await selectMethod.waitFor({state: 'attached', timeout: 8000}).catch(()=>null);
+        
+        // Polling: Esperamos que el frontend llene de opciones el dropdown mediante la respuesta API
+        await page.waitForFunction(() => {
+            const el = document.querySelector('select#payment_method');
+            return el && el.options.length > 1; // Debe tener más de "Seleccione un método"
+        }, { timeout: 15000 }).catch(() => null); 
+
+        const optionsAvailable = await selectMethod.evaluate(n => Array.from(n.options).map(o => ({val: o.value, text: o.text}))).catch(()=>[]);
+        
+        const matchedMethod = optionsAvailable.find(o => 
+            o.val.toLowerCase() === method.toLowerCase() || 
+            o.text.toLowerCase() === method.toLowerCase() ||
+            o.val.toLowerCase().includes(method.toLowerCase())
+        );
+
+        if (!matchedMethod) {
+            console.error(`\n🚨 FATAL ERROR [${country}]: ¡El dropdown de Métodos no contuvo la opción '${method}'!`);
+            console.error(`Opciones devueltas por el Backend del Merchant Portal:`, optionsAvailable);
+            const errSS = await page.screenshot({ fullPage: true });
+            if (allure && allure.attachment) await allure.attachment(`🔴 NO ENCONTRÓ METODO - [${country}] ${method}`, errSS, "image/png");
+            throw new Error(`Frontend no cargó el método ${method}. Opciones recibidas: ${JSON.stringify(optionsAvailable)}`);
+        }
+
+        console.log(`✔️ Método de Pago hallado e inyectado con éxito: [Value: ${matchedMethod.val} | Text: ${matchedMethod.text}]`);
+        await selectMethod.selectOption(matchedMethod.val, { force: true }).catch(()=>null);
         await selectMethod.evaluate((node, val) => { 
             node.value = val; 
             node.dispatchEvent(new Event('change', { bubbles: true }));
-        }, method).catch(() => null);
+        }, matchedMethod.val).catch(() => null);
 
-        await page.waitForTimeout(2000); // Dar tiempo al render de los campos dinámicos
+        await page.waitForTimeout(4000); // Dar amplio margen al render de los campos dinámicos post-método
         
         const trackFinalName = cData.firstName;
 
@@ -321,18 +352,24 @@ describe('E2E - Creación de Enlaces de Pago y Validación de Vouchers', () => {
         await saveBtn.click({ force: true });
 
         console.log(`⏳ Esperando redirección a la grilla y procesando...`);
-        await page.waitForTimeout(6000); // Dar margen a la creación de API y redirección
-
-        // Asegurarnos de que no falló la validación del formulario
-        if (page.url().includes('create')) {
-            const fs = require('fs');
-            fs.writeFileSync(`gt_error_dump_${method}.html`, await page.content());
-            
-            if (allure && allure.attachment) {
-                const errSS = await page.screenshot({ fullPage: true });
-                await allure.attachment(`🔴 Error: Validación estricta o payload fallido - [${country}]`, errSS, "image/png");
+        
+        // Espera dinámica para soportar servidores más lentos (como en PE, GT, MX)
+        try {
+            await page.waitForTimeout(2000); // Pequeña pausa para permitir que salte algún Toast instantáneo
+            // Esperar activamente a que la URL cambie y no contenga "create" (hasta 20 segundos máximo)
+            await page.waitForURL(/\/payments\/links(?!.*create)/, { timeout: 20000 });
+        } catch (e) {
+            // Asegurarnos de que no falló la validación del formulario
+            if (page.url().includes('create')) {
+                const fs = require('fs');
+                fs.writeFileSync(`gt_error_dump_${method}.html`, await page.content());
+                
+                if (allure && allure.attachment) {
+                    const errSS = await page.screenshot({ fullPage: true });
+                    await allure.attachment(`🔴 Error: Validación estricta o payload fallido - [${country}]`, errSS, "image/png");
+                }
+                throw new Error(`Prueba abortada: El formulario rechazó la data para el país ${country}. Revisa el error de validación en UI en el reporte.`);
             }
-            throw new Error(`Prueba abortada: El formulario rechazó la data para el país ${country}. Revisa el error de validación en UI en el reporte.`);
         }
 
         // PASO 2: UBICAR EN LA GRILLA

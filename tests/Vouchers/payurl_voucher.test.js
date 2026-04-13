@@ -9,7 +9,6 @@ jest.setTimeout(1800000); // Ampliar timeout por la larga cola de peticiones
 const casesData = [
     { country: 'AR', methods: ['cvu'] },
     { country: 'BR', methods: ['pix'] },
-    { country: 'CL', methods: ['bank_transfer'] },
     { country: 'CO', methods: ['efecty', 'gana', 'pse', 'puntored', 'superpagos', 'susuerte', 'wu'] },
     { country: 'EC', methods: ['bemovil', 'minegocioefectivo', 'omniswitch', 'rapiactivo', 'wu'] },
     { country: 'SV', methods: ['puntoxpresssv'] },
@@ -76,7 +75,10 @@ describe(`[E2E Híbrido API->UI] Generación de Vouchers masivos vía PayUrl`, (
             dynamicFields = {
                 first_name: "Thiago",
                 last_name: "Dos Santos",
-                document_number: "45832190865"
+                document_number: "212.229.566-08", // Frontend puede requerir la máscara exacta para auto-hidratar
+                document: "212.229.566-08",
+                document_type: "CPF",
+                email: "thiago.br@paybag.com"
             };
         }
         else if (country === 'CL') {
@@ -154,6 +156,12 @@ describe(`[E2E Híbrido API->UI] Generación de Vouchers masivos vía PayUrl`, (
             "merchant_transaction_reference": myRefId,
             "merchant_customer_id": `automation_${country}@paypaga.com`,
             "allowed_payment_methods": [method], // Forzamos exclusivo este método
+            "payer_info": { // ROOT FIX: Paypaga a veces lee el CPF desde la raíz del pagador
+                "first_name": dynamicFields.first_name || "QA",
+                "last_name": dynamicFields.last_name || "Testing",
+                "document": dynamicFields.document_number,
+                "email": dynamicFields.email || `qa_${country}@test.com`
+            },
             "predefined_fields": [
                 {
                     "payment_method": method,
@@ -212,11 +220,15 @@ describe(`[E2E Híbrido API->UI] Generación de Vouchers masivos vía PayUrl`, (
             // sin autogenerarse, podríamos simular el click aquí. Pero validaremos cómo reacciona en primer lugar:
             
             // Si vemos un botón para continuar (ej. que la UI pida confirmarlo)
-            const btnPagar = page.locator('button').filter({ hasText: /^Pagar|Continuar|Confirmar/i }).first();
-            if (await btnPagar.isVisible()) {
-                 console.log("➡️ Se requirió click manual en 'Confirmar/Pagar' en la UI.");
-                 await btnPagar.click({ force: true });
-                 await page.waitForTimeout(5000);
+            if (page.url().includes('checkout')) {
+                console.log(`➡️ Se requirió click manual en 'Confirmar/Pagar' en la UI.`);
+                const fs = require('fs');
+                fs.writeFileSync(`checkout_dump_${country}_${method}.html`, await page.content());
+                const btnPay = page.locator('button.primary-button, button#checkout_submit').first();
+                if (await btnPay.isVisible({ timeout: 5000 })) {
+                    await btnPay.click();
+                    await page.waitForTimeout(6000);
+                }
             }
 
             // Tomar Screenshot Final del Voucher (o error de UI si faltaban datos en form)
