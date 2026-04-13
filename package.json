@@ -11,6 +11,7 @@
     "axios": "^1.6.8"
   },
   "devDependencies": {
+    "@faker-js/faker": "^10.4.0",
     "allure-commandline": "^2.38.1",
     "allure-jest": "^3.6.0",
     "allure-js-commons": "^3.6.0",
