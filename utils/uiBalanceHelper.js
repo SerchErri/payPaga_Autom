@@ -7,10 +7,10 @@ const axios = require('axios');
  * sin importar si la transacción se originó mediante Interfaz de Usuario o llamando directamente a la API (H2H/Payurl).
  */
 
-const scrapeBalances = async (page) => {
-    return await page.evaluate(() => {
+const scrapeBalances = async (page, countryCode = 'EC') => {
+    return await page.evaluate((cc) => {
         const cleanVal = (txt) => parseFloat(txt.replace(/[^0-9.-]+/g, "") || "0");
-        const flexCountry = Array.from(document.querySelectorAll('div.flex.items-center')).find(d => d.innerText.trim() === 'EC');
+        const flexCountry = Array.from(document.querySelectorAll('div.flex.items-center')).find(d => d.innerText.trim() === cc);
         if(!flexCountry) return { general: 0, available: 0, withdrawals: 0, fees: 0, taxes: 0 };
         
         const countryContainer = flexCountry.closest('div.rounded-2xl');
@@ -39,13 +39,13 @@ const scrapeBalances = async (page) => {
             fees: getMetric('ni-coin'),
             taxes: getMetric('ni-reports')
         };
-    });
+    }, countryCode);
 };
 
 /**
- * Inicia sesión en Merchant Portal, obtiene los saldos actuales de EC y toma la fotografía acotada.
+ * Inicia sesión en Merchant Portal, obtiene los saldos actuales y toma la fotografía acotada al país.
  */
-const loginAndCaptureDashboard = async (page, allure, isInitial = true) => {
+const loginAndCaptureDashboard = async (page, allure, isInitial = true, countryCode = 'EC') => {
     let baseURL = envConfig.BASE_URL;
     const domainRoot = baseURL.replace("api", "admin").replace("admin", "merchant"); 
     let loginUrl = `${domainRoot}/login`; 
@@ -65,17 +65,17 @@ const loginAndCaptureDashboard = async (page, allure, isInitial = true) => {
     await page.waitForSelector('h3.text-2xl', { timeout: 20000 }).catch(()=>null);
     await page.waitForTimeout(3000); 
 
-    const balances = await scrapeBalances(page);
+    const balances = await scrapeBalances(page, countryCode);
     
-    // Autofocus y foto específica a Ecuador
-    const countryCard = page.locator('div.snap-start', { has: page.locator('img[alt="EC flag"]') }).first();
+    // Autofocus y foto específica
+    const countryCard = page.locator('div.snap-start', { has: page.locator(`img[alt="${countryCode} flag"]`) }).first();
     await countryCard.scrollIntoViewIfNeeded().catch(()=>null);
     await page.waitForTimeout(800);
 
     if(allure && allure.attachment){
         try {
             const cardBuffer = await countryCard.screenshot();
-            await allure.attachment(`📸 Evidencia Visual: Tablero de EC (${isInitial ? 'Antes de ejecutar operación' : 'Impacto confirmado'})`, cardBuffer, "image/png");
+            await allure.attachment(`📸 Evidencia Visual: Tablero de ${countryCode} (${isInitial ? 'Antes de ejecutar operación' : 'Impacto confirmado'})`, cardBuffer, "image/png");
         } catch(e){}
     }
 
@@ -116,6 +116,61 @@ const fastAdminAction = async (page, txId, operationType = 'pay-out', allure, ac
 };
 
 /**
+ * Función visual para recorrer la grilla del admin y aprobar visualmente (para reemplazar fastAdminAction).
+ */
+const visualAdminApprove = async (page, txId, operationType = 'pay-in', allure) => {
+    let currentEnv = (envConfig.currentEnvName || "dev").toLowerCase();
+    let adminUrl = `https://admin.v2.${currentEnv}.paypaga.com/login`;
+
+    await page.goto(adminUrl, { waitUntil: 'networkidle' });
+    
+    // Login Admin
+    await page.waitForSelector('input[type="email"]', { timeout: 15000 }).catch(()=>null);
+    await page.getByRole('textbox', { name: /Email/i }).fill("serrigo@paypaga.com");
+    await page.locator('input[type="password"]').fill("P@assword.");
+    const btnLoginAdmin = page.locator('button[type="submit"]').first();
+    await btnLoginAdmin.evaluate(node => node.disabled = false).catch(()=>null);
+    await btnLoginAdmin.click({ force: true });
+    
+    await page.waitForTimeout(4000); 
+
+    // Navegar a la lista de Transacciones dependiendo del tipo
+    if(operationType === 'pay-in') {
+        await page.goto(`https://admin.v2.${currentEnv}.paypaga.com/transactions/pay-in`, { waitUntil: 'networkidle' });
+    } else {
+        await page.goto(`https://admin.v2.${currentEnv}.paypaga.com/transactions/pay-out`, { waitUntil: 'networkidle' });
+    }
+
+    await page.waitForTimeout(4000); // Esperar a que renderice la grilla
+
+    // Buscar el botón dropdown en base al UUID
+    const actionBtn = page.locator(`#actions-btn-${txId}`).first();
+    await actionBtn.click({ timeout: 5000, force: true }).catch(async () => {
+         console.log("Visual Admin: Fallback a búsqueda genérica...");
+         const targetRow = page.locator('tr', { hasText: txId }).first();
+         await targetRow.locator('button').last().click({ timeout: 4000 }).catch(()=>null);
+    });
+
+    await page.waitForTimeout(1000);
+
+    // Clic en "Mark as approved"
+    const stateBtn = page.getByText(/mark as approved|marcar como aprobada/i).first();
+    await stateBtn.click({ force: true }).catch(()=>null);
+    
+    await page.waitForTimeout(5000); // Dar holgura a la validación UI
+
+    if (allure && allure.attachment) {
+        try {
+            const buf = await page.screenshot({ fullPage: true });
+            await allure.attachment(`Aprobación Visual en Modal Admin Completada`, buf, "image/png");
+        } catch(e){}
+    }
+
+    // Logout
+    await page.goto(`https://admin.v2.${currentEnv}.paypaga.com/logout`).catch(()=>null);
+};
+
+/**
  * Automáticamente carga fondos a la cuenta usando un Pay-in fantasma y aprobándolo vía Admin, garantizando liquidez antes de correr suites.
  */
 const preLoadFunds = async (page, token, allure, amountToLoad = 10000.00) => {
@@ -148,6 +203,6 @@ const preLoadFunds = async (page, token, allure, amountToLoad = 10000.00) => {
 module.exports = {
     loginAndCaptureDashboard,
     fastAdminAction,
-    scrapeBalances,
-    preLoadFunds
+    preLoadFunds,
+    visualAdminApprove
 };

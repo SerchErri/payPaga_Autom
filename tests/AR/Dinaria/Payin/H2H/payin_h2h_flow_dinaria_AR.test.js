@@ -3,7 +3,7 @@ const allure = require('allure-js-commons');
 const { chromium } = require('playwright');
 const { getAccessToken } = require('../../../../../utils/authHelper');
 const envConfig = require('../../../../../utils/envConfig');
-const { loginAndCaptureDashboard, fastAdminApprove } = require('../../../../../utils/uiBalanceHelper');
+const { loginAndCaptureDashboard, fastAdminAction } = require('../../../../../utils/uiBalanceHelper');
 
 jest.setTimeout(1800000); // 30 mins para UI operations
 
@@ -34,34 +34,8 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
         // ============================================================================== //
         // 1. CAPTURAR DASHBOARD Y SALDOS INICIALES
         // ============================================================================== //
-        initialBalances = await loginAndCaptureDashboard(page, allure, true);
+        initialBalances = await loginAndCaptureDashboard(page, allure, true, 'AR');
         console.log("📈 SALDOS INICIALES PAYIN (UI):", initialBalances);
-
-        // ============================================================================== //
-        // 2. OBTENER INFORMACIÓN DEL MÉTODO DE PAGO para ARGENTINA (AR) 
-        // ============================================================================== //
-        const configUrl = `${envConfig.BASE_URL}/v2/transactions/pay-in/config?country=AR`;
-
-        const configResponse = await axios.get(configUrl, {
-            headers: {
-                'DisablePartnerMock': 'true',
-                'Authorization': `Bearer ${token}`
-            },
-            validateStatus: () => true
-        });
-
-        if (configResponse.status !== 200) {
-            console.error('El endpoint del GET Config AR falló:', JSON.stringify(configResponse.data, null, 2));
-        }
-        expect(configResponse.status).toBe(200);
-
-        if (allure && allure.attachment) {
-            await allure.attachment(
-                `Paso 2 - Respuesta Config AR [${envConfig.currentEnvName.toUpperCase()}]`,
-                JSON.stringify(configResponse.data, null, 2),
-                "application/json"
-            );
-        }
 
         // ============================================================================== //
         // 3. CREACIÓN DEL PAY-IN H2H (Directo a Servidor)
@@ -70,7 +44,7 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
 
         const referenceId = `AR-DINARIA-H2H-${Date.now()}`;
         const payload = {
-            "amount": 1000, 
+            "amount": 1000,
             "country": "AR",
             "currency": "ARS",
             "payment_method": "cvu",
@@ -78,8 +52,8 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
             "merchant_return_url": `${envConfig.BASE_URL}/pay/completed`,
             "merchant_customer_id": envConfig.FRONTEND_PARAMS.email,
             "fields": {
-                "first_name": "João",
-                "last_name": "Silva",
+                "first_name": "Sergio",
+                "last_name": "Test",
                 "document_number": "20-08490848-8"
             },
             "allowOverUnder": true,
@@ -137,17 +111,17 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
 
         // En vez de recargar la SPA con goto, navegamos nativamente haciendo click (Evita el 404 del Router frontend)
         const btnTransacciones = page.getByRole('link', { name: ' Transacciones ' }).first();
-        await btnTransacciones.click({ force: true }).catch(()=>null);
+        await btnTransacciones.click({ force: true }).catch(() => null);
         await page.waitForTimeout(1000);
-        
+
         const btnEntradas = page.getByRole('link', { name: 'Transacciones de Entrada' }).first();
-        await btnEntradas.click({ force: true }).catch(()=>null);
-        
+        await btnEntradas.click({ force: true }).catch(() => null);
+
         await page.waitForTimeout(8000); // Dar holgura a la carga de la tabla armada por React
 
         // Si la tabla contiene el amount gigante, significa que cayó exitosamente a nivel UI
-        const tableContent = await page.locator('table').innerText().catch(async () => await page.innerText('body').catch(()=>""));
-        
+        const tableContent = await page.locator('table').innerText().catch(async () => await page.innerText('body').catch(() => ""));
+
         console.log("=== DEBUG TABLA PAYIN H2H ===");
         console.log(tableContent);
         console.log("=============================");
@@ -156,19 +130,21 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
         expect(hasRenderedAmmount).toBe(true); // La UI procesó el webhook exitosamente
 
         if (allure && allure.attachment) {
-            const tableSnap = await page.locator('table').screenshot({ timeout: 5000 }).catch(() => null);
-            if (tableSnap) await allure.attachment(`📸 Evidencia Visual Grilla: Transacción H2H aterrizó en UI`, tableSnap, "image/png");
+            // Se corta la imagen solo a la fila afectada para una lectura limpia
+            const rowLocator = page.locator('tr', { hasText: referenceId }).first();
+            const tableRowSnap = await rowLocator.screenshot({ timeout: 5000 }).catch(() => null);
+            if (tableRowSnap) await allure.attachment(`📸 Evidencia Visual Grilla: Fila específica del Payin H2H`, tableRowSnap, "image/png");
         }
 
         // ============================================================================== //
-        // 5. ADMIN PORTAL (APROBACIÓN AGIL UI)
+        // 5. ADMIN PORTAL (APROBACIÓN AGIL UI VIA GET)
         // ============================================================================== //
-        await fastAdminApprove(page, trID, 'pay-in', allure);
+        await fastAdminAction(page, trID, 'pay-in', allure, 'approve');
 
         // ============================================================================== //
         // 6. REGRESAR AL DASHBOARD Y VALIDAR IMPACTO
         // ============================================================================== //
-        const finalBalances = await loginAndCaptureDashboard(page, allure, false);
+        const finalBalances = await loginAndCaptureDashboard(page, allure, false, 'AR');
         console.log("📈 SALDOS FINALES PAYIN TRAS APROBACIÓN H2H:", finalBalances);
 
         // Validaciones Tolerantes al Paralelismo
@@ -177,8 +153,25 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
         expect(finalBalances.fees !== initialBalances.fees).toBeTruthy();
         expect(finalBalances.taxes !== initialBalances.taxes).toBeTruthy();
 
+        const mathReport = `
+============================================================
+🧮 PAY-IN IMPACT CALCULATION (AR)
+============================================================
+• Initial Volume           : ${initialBalances.volume}
+• Initial Taxes            : ${initialBalances.taxes}
+• Initial Fees             : ${initialBalances.fees}
+------------------------------------------------------------
+💰 New Available (AR)      : ${finalBalances.available}
+📈 Traded Diff             : + ${parseFloat((finalBalances.volume - initialBalances.volume).toFixed(2))}
+💸 Taxes Diff              : ${parseFloat((finalBalances.taxes - initialBalances.taxes).toFixed(2))}
+🏦 Fees Diff               : ${parseFloat((finalBalances.fees - initialBalances.fees).toFixed(2))}
+============================================================`;
+
+        console.log(mathReport);
+
         if (allure && allure.attachment) {
             await allure.attachment(`Comparativa PayIn AR Dinaria H2H`, JSON.stringify({ SALDOS_INICIALES: initialBalances, SALDOS_FINALES: finalBalances }, null, 2), "application/json");
+            await allure.attachment(`Cálculos Matemáticos Resultantes`, mathReport, "text/plain");
         }
     });
 
