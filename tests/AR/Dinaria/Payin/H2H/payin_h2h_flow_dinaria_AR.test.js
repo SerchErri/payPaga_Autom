@@ -126,15 +126,22 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
         console.log(tableContent);
         console.log("=============================");
 
-        const hasRenderedAmmount = tableContent.includes('1000') || tableContent.includes('1.000');
-        expect(hasRenderedAmmount).toBe(true); // La UI procesó el webhook exitosamente
+        // Validamos explícitamente que la orden esté listada
+        const rowLocator = page.locator('tbody tr').filter({ hasText: /1000|1\.000|1,000/ }).first();
+        await rowLocator.waitFor({ state: 'visible', timeout: 8000 }).catch(() => null);
+
+        // Zoom out out para que los grids responsivos encajen horizontalmente en un solo pantallazo
+        await page.evaluate(() => { document.body.style.zoom = "0.7"; }).catch(()=>null);
+        await page.waitForTimeout(1500);
 
         if (allure && allure.attachment) {
-            // Se corta la imagen solo a la fila afectada para una lectura limpia
-            const rowLocator = page.locator('tr', { hasText: referenceId }).first();
+            await rowLocator.scrollIntoViewIfNeeded().catch(()=>null);
+            // Capturamos el bounding box de este tr en especifico
             const tableRowSnap = await rowLocator.screenshot({ timeout: 5000 }).catch(() => null);
-            if (tableRowSnap) await allure.attachment(`📸 Evidencia Visual Grilla: Fila específica del Payin H2H`, tableRowSnap, "image/png");
+            if (tableRowSnap) await allure.attachment(`📸 Grid Visual Evidence: Specific Payin H2H Row`, tableRowSnap, "image/png");
         }
+
+        await page.evaluate(() => { document.body.style.zoom = "1"; }).catch(()=>null);
 
         // ============================================================================== //
         // 5. ADMIN PORTAL (APROBACIÓN AGIL UI VIA GET)
@@ -153,19 +160,28 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
         expect(finalBalances.fees !== initialBalances.fees).toBeTruthy();
         expect(finalBalances.taxes !== initialBalances.taxes).toBeTruthy();
 
+        const opDiff = parseFloat((finalBalances.volume - initialBalances.volume).toFixed(2));
+        const feeDiff = parseFloat((Math.abs(finalBalances.fees) - Math.abs(initialBalances.fees)).toFixed(2));
+        const taxDiff = parseFloat((Math.abs(finalBalances.taxes) - Math.abs(initialBalances.taxes)).toFixed(2));
+        const netValue = parseFloat((opDiff - feeDiff - taxDiff).toFixed(2));
+
         const mathReport = `
-============================================================
-🧮 PAY-IN IMPACT CALCULATION (AR)
-============================================================
-• Initial Volume           : ${initialBalances.volume}
-• Initial Taxes            : ${initialBalances.taxes}
-• Initial Fees             : ${initialBalances.fees}
-------------------------------------------------------------
-💰 New Available (AR)      : ${finalBalances.available}
-📈 Traded Diff             : + ${parseFloat((finalBalances.volume - initialBalances.volume).toFixed(2))}
-💸 Taxes Diff              : ${parseFloat((finalBalances.taxes - initialBalances.taxes).toFixed(2))}
-🏦 Fees Diff               : ${parseFloat((finalBalances.fees - initialBalances.fees).toFixed(2))}
-============================================================`;
+==================================================================
+🧮 H2H IMPACT CALCULATION (AR)
+==================================================================
+Concept              | Details                     | Oper | Value
+------------------------------------------------------------------
+Initial Test Balance | Opening Balance             | ARS  | ${initialBalances.available.toFixed(2)}
+H2H PayIn Amount     | ${opDiff.toFixed(0)} In (-) ${feeDiff.toFixed(2)} F (-) ${taxDiff.toFixed(2)} T |  -   | ${netValue.toFixed(2)}
+------------------------------------------------------------------
+Current Test Balance | Total current balance in UI | ARS  | ${finalBalances.available.toFixed(2)}
+==================================================================
+Concept              | Details                     | Oper | Total
+------------------------------------------------------------------
+Fees                 | ${Math.abs(initialBalances.fees).toFixed(2).padEnd(8)} | (+) ${feeDiff.toFixed(2).padEnd(6)} | ARS  | ${Math.abs(finalBalances.fees).toFixed(2)}
+Taxes                | ${Math.abs(initialBalances.taxes).toFixed(2).padEnd(8)} | (+) ${taxDiff.toFixed(2).padEnd(6)} | ARS  | ${Math.abs(finalBalances.taxes).toFixed(2)}
+==================================================================
+`;
 
         console.log(mathReport);
 

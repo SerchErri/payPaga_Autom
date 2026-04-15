@@ -3,11 +3,11 @@ const allure = require('allure-js-commons');
 const { chromium } = require('playwright');
 const envConfig = require('../../../../../utils/envConfig');
 const { getAccessToken } = require('../../../../../utils/authHelper');
-const { loginAndCaptureDashboard, fastAdminApprove } = require('../../../../../utils/uiBalanceHelper');
+const { loginAndCaptureDashboard, fastAdminAction } = require('../../../../../utils/uiBalanceHelper');
 
 jest.setTimeout(1800000); // Ampliar timeout a 30 mins para UI operations
 
-describe(`[E2E Híbrido] Crear Link de Pago (PayUrl) EC [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`[Hybrid E2E] Create Payment Link (PayUrl) Dinaria (AR) [Env: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 
     let token = '';
     let browser;
@@ -30,67 +30,41 @@ describe(`[E2E Híbrido] Crear Link de Pago (PayUrl) EC [Amb: ${envConfig.curren
         if (browser) await browser.close();
     });
 
-    test('Flujo Ómnicanal: Capturar Saldo UI -> Generar PayUrl API -> Inspeccionar Grilla -> Aprobar Admin', async () => {
+    test('Omnichannel Flow: Capture UI Balance -> Generate PayUrl API -> Checkout Visit -> Inspect Grid -> Admin Approve', async () => {
         // ============================================================================== //
         // 1. CAPTURAR DASHBOARD Y SALDOS INICIALES
         // ============================================================================== //
-        initialBalances = await loginAndCaptureDashboard(page, allure, true);
-        console.log("📈 SALDOS INICIALES PAYURL (UI):", initialBalances);
+        initialBalances = await loginAndCaptureDashboard(page, allure, true, 'AR');
+        console.log("📈 INITIAL PAYURL BALANCES (UI):", initialBalances);
 
-        // ============================================================================== //
-        // 2. CONFIGURACIÓN GET EC (Validación Dinámica de Fee Payer)
-        // ============================================================================== //
-        const configUrl = `${envConfig.BASE_URL}/v2/transactions/pay-in/config?country=EC`;
-        const configResp = await axios.get(configUrl, {
-            headers: { 'Authorization': `Bearer ${token}`, 'DisablePartnerMock': 'true' }
-        });
-
-        expect(configResp.status).toBe(200);
-
-        // Extraer dinámicamente "qué fee_payer espera el sistema" (en vez de hardcodear)
-        let dynamicFeePayer = "merchant"; // Fallback seguro
-        const ecConfig = configResp.data.countries ? configResp.data.countries.find(c => c.country === 'EC') : null;
-        if (ecConfig && ecConfig.payment_methods) {
-            const bt = ecConfig.payment_methods.find(p => p.payment_method === 'bank_transfer');
-            if (bt && bt.fee_payers && bt.fee_payers.length > 0) {
-                // si el array trae 'merchant', 'customer', 'both'... escogemos el primero disponible que el Backend exija.
-                dynamicFeePayer = bt.fee_payers[0];
-            }
-        }
-
-        if (allure && allure.attachment) {
-            await allure.attachment("Response Config EC (Fee Dinámico Evaluado)", JSON.stringify({ raw: configResp.data, seleccionado: dynamicFeePayer }, null, 2), "application/json");
-        }
 
         // ============================================================================== //
         // 3. GENERAR LINK DE PAGO (POST /v2/pay-urls)
         // ============================================================================== //
-        const myRefId = `PayUrl-EC-${Date.now()}`;
+        const myRefId = `PayUrl-AR-${Date.now()}`;
         const payUrlEndpoint = `${envConfig.BASE_URL}/v2/pay-urls`;
         const validPayload = {
-            "country": "EC",
-            "currency": "USD",
-            "amount": payurlAmountConfig,
-            // Quitamos el fee_payer inyectado visualmente para que Backend asuma su Default contable
+            "country": "AR",
+            "currency": "ARS",
+            "amount": 1000,
             "merchant_transaction_reference": myRefId,
-            "merchant_customer_id": "cliente_ec@ejemplo.com",
-            "allowed_payment_methods": ["bank_transfer"],
+            "merchant_customer_id": envConfig.FRONTEND_PARAMS.email || "cliente_ar@ejemplo.com",
+            "allowed_payment_methods": ["cvu"],
+            "allowOverUnder": true,
             "predefined_fields": [
                 {
-                    "payment_method": "bank_transfer",
+                    "payment_method": "cvu",
                     "fields": {
                         "first_name": "Sergio",
                         "last_name": "Test",
-                        "email": "serrigo@paypaga.com",
-                        "document_type": "CI",
-                        "document_number": "1307990091"
+                        "document_number": "20-08490848-8"
                     }
                 }
             ]
         };
 
         if (allure && allure.attachment) {
-            await allure.attachment("Request Carga Feliz", JSON.stringify(validPayload, null, 2), "application/json");
+            await allure.attachment("Step 3 - POST AR Payload Sent", JSON.stringify(validPayload, null, 2), "application/json");
         }
 
         const response = await axios.post(payUrlEndpoint, validPayload, {
@@ -105,9 +79,9 @@ describe(`[E2E Híbrido] Crear Link de Pago (PayUrl) EC [Amb: ${envConfig.curren
         expect(response.status).toBe(201);
         expect(response.data.transaction_id).toBeDefined();
 
-        const trID = response.data.transaction_id;
+        const trID = response.data.transaction_id || response.data.id;
 
-        console.log(`\n🎉 Link de Pago Generado Correctamente [EC]: ${response.status}`);
+        console.log(`\n🎉 Link de Pago Generado Correctamente [AR]: ${response.status}`);
         
         // ============================================================================== //
         // 3.5. VISITAR LA URL DEL CHECKOUT PARA MATERIALIZAR FEES (Crítico!)
@@ -141,18 +115,29 @@ describe(`[E2E Híbrido] Crear Link de Pago (PayUrl) EC [Amb: ${envConfig.curren
 
         const tableContent = await page.locator('table').innerText().catch(async () => await page.innerText('body').catch(() => ""));
 
-        console.log("=== DEBUG TABLA PAYURL ===");
+        console.log("=== DEBUG PAYURL GRID ===");
         console.log(tableContent);
         console.log("==========================");
 
-        const hasRenderedAmmount = tableContent.includes('25.55') || tableContent.includes('25,55');
+        const hasRenderedAmmount = tableContent.includes('1000') || tableContent.includes('1.000');
         expect(hasRenderedAmmount).toBe(true);
 
-        // Capturamos ÚNICAMENTE la primera fila (la transacción actual) para acortar la imagen en el reporte.
+        // Validamos explícitamente que la orden esté listada
+        const rowLocator = page.locator('tbody tr').filter({ hasText: /1000|1\.000|1,000/ }).first();
+        await rowLocator.waitFor({ state: 'visible', timeout: 8000 }).catch(() => null);
+
+        // Zoom out out para que los grids responsivos encajen horizontalmente en un solo pantallazo
+        await page.evaluate(() => { document.body.style.zoom = "0.7"; }).catch(()=>null);
+        await page.waitForTimeout(1500);
+
         if (allure && allure.attachment) {
-            const tableRowSnap = await page.locator('tbody tr').first().screenshot({ timeout: 5000 }).catch(() => null);
-            if (tableRowSnap) await allure.attachment(`📸 Evidencia Visual Grilla: Transacción PayUrl Aislada`, tableRowSnap, "image/png");
+            await rowLocator.scrollIntoViewIfNeeded().catch(()=>null);
+            // Capturamos el bounding box de este tr en especifico
+            const tableRowSnap = await rowLocator.screenshot({ timeout: 5000 }).catch(() => null);
+            if (tableRowSnap) await allure.attachment(`📸 Grid Visual Evidence: Specific PayUrl Row`, tableRowSnap, "image/png");
         }
+
+        await page.evaluate(() => { document.body.style.zoom = "1"; }).catch(()=>null);
 
         const realGridTxId = await page.evaluate((ref) => {
             const rows = Array.from(document.querySelectorAll('tr'));
@@ -165,23 +150,49 @@ describe(`[E2E Híbrido] Crear Link de Pago (PayUrl) EC [Amb: ${envConfig.curren
         }, myRefId);
 
         // ============================================================================== //
-        // 5. ADMIN PORTAL (APROBACIÓN AGIL UI)
+        // 5. ADMIN PORTAL (APROBACIÓN AGIL UI VIA GET)
         // ============================================================================== //
-        await fastAdminApprove(page, realGridTxId || trID, 'pay-in', allure);
+        await fastAdminAction(page, realGridTxId || trID, 'pay-in', allure, 'approve');
 
         // ============================================================================== //
         // 6. REGRESAR AL DASHBOARD Y VALIDAR IMPACTO
         // ============================================================================== //
-        const finalBalances = await loginAndCaptureDashboard(page, allure, false);
-        console.log("📈 SALDOS FINALES PAYURL TRAS APROBACIÓN:", finalBalances);
+        const finalBalances = await loginAndCaptureDashboard(page, allure, false, 'AR');
+        console.log("📈 FINAL PAYURL BALANCES AFTER APPROVAL:", finalBalances);
 
         expect(finalBalances.available).toBeGreaterThan(initialBalances.available);
         expect(finalBalances.volume).toBeGreaterThan(initialBalances.volume);
         expect(finalBalances.fees !== initialBalances.fees).toBeTruthy();
         expect(finalBalances.taxes !== initialBalances.taxes).toBeTruthy();
 
+        const opDiff = parseFloat((finalBalances.volume - initialBalances.volume).toFixed(2));
+        const feeDiff = parseFloat((Math.abs(finalBalances.fees) - Math.abs(initialBalances.fees)).toFixed(2));
+        const taxDiff = parseFloat((Math.abs(finalBalances.taxes) - Math.abs(initialBalances.taxes)).toFixed(2));
+        const netValue = parseFloat((opDiff - feeDiff - taxDiff).toFixed(2));
+
+        const mathReport = `
+==================================================================
+🧮 PAYURL IMPACT CALCULATION (AR)
+==================================================================
+Concept              | Details                     | Oper | Value
+------------------------------------------------------------------
+Initial Test Balance | Opening Balance             | ARS  | ${initialBalances.available.toFixed(2)}
+PayUrl Amount        | ${opDiff.toFixed(0)} In (-) ${feeDiff.toFixed(2)} F (-) ${taxDiff.toFixed(2)} T |  -   | ${netValue.toFixed(2)}
+------------------------------------------------------------------
+Current Test Balance | Total current balance in UI | ARS  | ${finalBalances.available.toFixed(2)}
+==================================================================
+Concept              | Details                     | Oper | Total
+------------------------------------------------------------------
+Fees                 | ${Math.abs(initialBalances.fees).toFixed(2).padEnd(8)} | (+) ${feeDiff.toFixed(2).padEnd(6)} | ARS  | ${Math.abs(finalBalances.fees).toFixed(2)}
+Taxes                | ${Math.abs(initialBalances.taxes).toFixed(2).padEnd(8)} | (+) ${taxDiff.toFixed(2).padEnd(6)} | ARS  | ${Math.abs(finalBalances.taxes).toFixed(2)}
+==================================================================
+`;
+        
+        console.log(mathReport);
+
         if (allure && allure.attachment) {
-            await allure.attachment(`Comparativa PayUrl EC E2E`, JSON.stringify({ SALDOS_INICIALES: initialBalances, SALDOS_FINALES: finalBalances }, null, 2), "application/json");
+            await allure.attachment(`PayUrl AR Dinaria Comparison`, JSON.stringify({ INITIAL_BALANCES: initialBalances, FINAL_BALANCES: finalBalances }, null, 2), "application/json");
+            await allure.attachment(`Resulting Mathematical Calculations`, mathReport, "text/plain");
         }
     });
 
