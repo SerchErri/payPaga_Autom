@@ -19,12 +19,12 @@ const envConfig = require('../../utils/envConfig');
 jest.setTimeout(2400000);
 
 const casesData = [
-  // { country: 'AR', methods: ['cvu'] },
-  // { country: 'BR', methods: ['pix'] },
-  // { country: 'CL', methods: ['bank_transfer'] },
-  // { country: 'CO', methods: ['efecty', 'gana', 'pse', 'puntored', 'superpagos', 'susuerte', 'wu'] },
-  // { country: 'EC', methods: ['bemovil', 'minegocioefectivo', 'omniswitch', 'rapiactivo', 'wu'] },
-  // { country: 'SV', methods: ['puntoxpresssv'] },
+  { country: 'AR', methods: ['cvu'] },
+  { country: 'BR', methods: ['pix'] },
+  { country: 'CL', methods: ['bank_transfer'] },
+  { country: 'CO', methods: ['efecty', 'gana', 'pse', 'puntored', 'superpagos', 'susuerte', 'wu'] },
+  { country: 'EC', methods: ['bemovil', 'minegocioefectivo', 'omniswitch', 'rapiactivo', 'wu'] },
+  { country: 'SV', methods: ['puntoxpresssv'] },
   { country: 'GT', methods: ['bam'] },
   { country: 'MX', methods: ['paycash', 'spei'] },
   { country: 'PE', methods: ['bcp', 'bcp_efectivo', 'cellpower', 'globokas'] }
@@ -203,24 +203,8 @@ describe('E2E - Creación de Enlaces de Pago y Validación de Vouchers', () => {
             cData.currency = 'PEN'; cData.amount = '1150.56'; cData.phone = '981234567'; cData.confCode = '654321';
         }
 
-        // DESTRABAR DESPLEGABLES EN CASCADA: Seleccionar moneda si existe para que Method se pueble
-        if (cData.currency) {
-            const currencySel = page.locator('select#currency, select[name="currency"]').first();
-            await currencySel.waitFor({ state: 'attached', timeout: 3000 }).catch(()=>null);
-            // Solo interactuar si está habilitado y visible, para no romper auto-fetch
-            if (await currencySel.isVisible() && await currencySel.isEnabled()) {
-                const curOpts = await currencySel.evaluate(n => Array.from(n.options).map(o => o.value)).catch(()=>[]);
-                const matchedCur = curOpts.find(v => v.toLowerCase() === cData.currency.toLowerCase());
-                if (matchedCur) {
-                    await currencySel.selectOption(matchedCur, { force: true }).catch(()=>null);
-                    await currencySel.evaluate((node, val) => { 
-                        node.value = val; 
-                        node.dispatchEvent(new Event('change', { bubbles: true }));
-                    }, matchedCur).catch(() => null);
-                    await page.waitForTimeout(3000); 
-                }
-            }
-        }
+        // SE ELIMINÓ LA INTERACCIÓN DE MONEDA PARA EVITAR RESET DE METHODS EN REACT
+
 
         // SELECCIÓN DE MÉTODO (SMART LOCATOR E INSPECTOR DE DOM)
         const selectMethod = page.locator('select#payment_method');
@@ -250,12 +234,21 @@ describe('E2E - Creación de Enlaces de Pago y Validación de Vouchers', () => {
 
         console.log(`✔️ Método de Pago hallado e inyectado con éxito: [Value: ${matchedMethod.val} | Text: ${matchedMethod.text}]`);
         await selectMethod.selectOption(matchedMethod.val, { force: true }).catch(()=>null);
+        
+        // Forzamos manualmente el estado en el DOM para asegurar que no quede vacío ('El Triple Check')
         await selectMethod.evaluate((node, val) => { 
             node.value = val; 
-            node.dispatchEvent(new Event('change', { bubbles: true }));
+            if (typeof Event === 'function') {
+                node.dispatchEvent(new Event('input', { bubbles: true })); // VITAL para React hooks
+                node.dispatchEvent(new Event('change', { bubbles: true }));
+            }
         }, matchedMethod.val).catch(() => null);
 
-        await page.waitForTimeout(4000); // Dar amplio margen al render de los campos dinámicos post-método
+        // ESPERA CRÍTICA: En MX/PE/GT el form cambia mucho al elegir método
+        await page.waitForTimeout(3000); 
+
+        // Si existe un loader de UI (ej. spinner de tailwind), esperamos que desaparezca
+        await page.waitForSelector('.spinner, .loader, [role="status"]', { state: 'hidden', timeout: 5000 }).catch(()=>null);
         
         const trackFinalName = cData.firstName;
 
@@ -349,6 +342,17 @@ describe('E2E - Creación de Enlaces de Pago y Validación de Vouchers', () => {
 
         // CREAR ENLACE
         const saveBtn = page.locator('button#save').or(page.locator('button:has-text("Crear Enlace de Pago")')).first();
+        
+        // INTERCEPTOR PARA DIAGNÓSTICO EN FRÍO
+        page.once('response', async (res) => {
+            if (res.url().includes('/links') && res.request().method() === 'POST') {
+                if (!res.ok()) {
+                    const text = await res.text().catch(()=>'');
+                    console.error(`🚨 PAYLOAD RECHAZADO POR SERVER [${country}]: `, res.status(), text);
+                }
+            }
+        });
+
         await saveBtn.click({ force: true });
 
         console.log(`⏳ Esperando redirección a la grilla y procesando...`);

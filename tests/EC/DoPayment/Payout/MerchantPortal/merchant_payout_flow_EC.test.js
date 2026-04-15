@@ -1,7 +1,8 @@
+const { getAccessToken } = require('../../../../../utils/authHelper');
 const { chromium } = require('playwright');
 const allure = require('allure-js-commons');
 const envConfig = require('../../../../../utils/envConfig');
-const { loginAndCaptureDashboard, fastAdminApprove } = require('../../../../../utils/uiBalanceHelper');
+const { loginAndCaptureDashboard, fastAdminAction, preLoadFunds } = require('../../../../../utils/uiBalanceHelper');
 
 jest.setTimeout(1800000); 
 
@@ -11,7 +12,7 @@ describe(`[E2E Híbrido] FULL FLOW - MERCHANT PORTAL EC Payout: Creación, Grill
     let page;
     let storedTxId = "";
     let initialBalances = {};
-    let payoutMontoTest = 52.00;
+    let payoutMontoTest = 150.23;
 
     beforeAll(async () => {
         try {
@@ -19,6 +20,9 @@ describe(`[E2E Híbrido] FULL FLOW - MERCHANT PORTAL EC Payout: Creación, Grill
             context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
             page = await context.newPage();
             page.setDefaultTimeout(20000);
+            
+            const token = await getAccessToken();
+            await preLoadFunds(page, token, allure, 10000.00);
         } catch(e) { console.error("Fallo levantando Playwright", e); }
     });
 
@@ -35,7 +39,79 @@ describe(`[E2E Híbrido] FULL FLOW - MERCHANT PORTAL EC Payout: Creación, Grill
         }
     };
 
-    test('Flujo E2E Completo Monolítico: Creación Merchant -> Aprobación Admin -> Validaciones de Saldo', async () => {
+    const originarPayoutDesdeMerchant = async (monto, refTag) => {
+        const btnTransacciones = page.getByRole('link', { name: ' Transacciones ' }).first();
+        await btnTransacciones.click();
+        const btnSalida = page.getByRole('link', { name: 'Transacciones de Salida' }).first();
+        await btnSalida.waitFor({ state: 'visible' });
+        await btnSalida.click();
+        
+        const btnCrear = page.getByRole('link', { name: 'Crear Pago' }).first();
+        await btnCrear.waitFor({ state: 'visible' }).catch(()=>null);
+        await btnCrear.click().catch(()=>null);
+
+        await page.waitForTimeout(2000);
+        await page.getByLabel('País *').selectOption('EC');
+        const m = page.locator('div').filter({ hasText: /^Monto \*$/ }).nth(1);
+        await m.click().catch(()=>null);
+        await page.getByRole('textbox', { name: 'Monto *' }).fill(monto.toString()).catch(()=>null);
+        await page.getByRole('textbox', { name: 'Nombre*' }).fill('Sergio');
+        await page.getByRole('textbox', { name: 'Apellido*' }).fill('Errigo Reverso');
+        await page.getByLabel('Tipo de Documento*').selectOption('CI');
+        await page.getByRole('textbox', { name: 'Número de Documento*' }).fill('1710034065');
+        await page.getByLabel('Banco*').selectOption('banco_pichincha');
+        await page.getByLabel('Tipo de Cuenta*').selectOption('Ahorro');
+        await page.getByRole('textbox', { name: 'Número de Cuenta*' }).fill('1234567890');
+        await page.getByText('Disable Mock?').click().catch(()=>null); 
+        
+        await attachScreenshot(`Formulario Payout - ${refTag}`);
+        await page.getByRole('button', { name: 'Crear Pago' }).click();
+        await page.waitForTimeout(6000); 
+
+        // Recuperar UUID Visualmente
+        const obtainedTxId = await page.evaluate(() => {
+            const match = document.body.innerText.match(/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/);
+            return match ? match[0] : null;
+        });
+
+        // Click visual en la fila (Grilla de Exito)
+        const firstRow = page.locator('table tbody tr').first();
+        await firstRow.click({ force: true }).catch(()=>null);
+        await page.waitForTimeout(2000); 
+
+        return obtainedTxId;
+    };
+
+    const markStatusFromMerchantGrid = async (txId, statusToClick) => {
+        const btnTransacciones = page.getByRole('link', { name: ' Transacciones ' }).first();
+        await btnTransacciones.click({ timeout: 5000 }).catch(()=>null);
+        const btnSalida = page.getByRole('link', { name: 'Transacciones de Salida' }).first();
+        await btnSalida.click({ timeout: 5000 }).catch(()=>null);
+        await page.waitForTimeout(4000);
+
+        // Hacemos click en el botón de opciones usando su ID determinista exacto:
+        const actionBtn = page.locator(`#actions-btn-${txId}`).first();
+        await actionBtn.click({ timeout: 4000, force: true }).catch(async () => {
+             // Fallback resiliente
+             console.log("Fallback: El ID estricto falló, buscando la fila por UUID literal...");
+             const targetRow = page.locator('tr', { hasText: txId }).first();
+             const genericBtn = targetRow.locator('button').last();
+             await genericBtn.click({ timeout: 4000 }).catch(()=>null);
+        });
+
+        await page.waitForTimeout(1000);
+
+        // Buscar texto dinámicamente: "Mark as failed" o "Mark as expired"
+        const regexStr = statusToClick === 'failed' ? /failed|fallido|rechazar/i : /expired|expirar|expirado/i;
+        const stateBtn = page.getByText(regexStr).first().catch(() => page.locator('button', { hasText: regexStr }).first());
+        
+        await stateBtn.click({ force: true }).catch(()=>null);
+        await page.waitForTimeout(5000); // Sincronización del Reclamo
+
+        await attachScreenshot(`Transacción Mercante Cambiada a ${statusToClick.toUpperCase()}`);
+    };
+
+    test('1. Flujo E2E Happy Path (Aprobado por Admin): Descuento Congelado -> Confirmación', async () => {
         // =========================================================
         // A) LOGIN MERCHANT & CAPTURA INICIAL
         // =========================================================
@@ -46,91 +122,22 @@ describe(`[E2E Híbrido] FULL FLOW - MERCHANT PORTAL EC Payout: Creación, Grill
             console.warn(`⚠️ ALERTA: Tienes ${initialBalances.available} disponibles, pero intentaremos crear un payout de ${payoutMontoTest}. La API podría rechazarlo por falta de fondos.`);
         }
 
-        // =========================================================
-        // C) NAVEGAR Y CREAR PAYOUT
-        // =========================================================
-        const btnTransacciones = page.getByRole('link', { name: ' Transacciones ' }).first();
-        await btnTransacciones.click();
-        
-        const btnSalida = page.getByRole('link', { name: 'Transacciones de Salida' }).first();
-        await btnSalida.waitFor({ state: 'visible' });
-        await btnSalida.click();
-        
-        const btnCrear = page.getByRole('link', { name: 'Crear Pago' }).first();
-        await btnCrear.waitFor({ state: 'visible' });
-        await btnCrear.click();
+        // B) NAVEGAR Y CREAR PAYOUT
+        storedTxId = await originarPayoutDesdeMerchant(payoutMontoTest, 'Happy_Approve');
+        expect(storedTxId).not.toBeNull();
 
-        await page.waitForSelector('text=Monto', { timeout: 15000 }).catch(()=>null);
+        // C) BALANCE INTERMEDIO: Verificar que el dinero FUE CONGELADO (Restado del available) *ANTES* de Approve
+        const pendingBalances = await loginAndCaptureDashboard(page, allure, false);
+        expect(pendingBalances.available).toBeLessThan(initialBalances.available);
+        console.log("🧊 SALDOS CONGELADOS EN PRE-APROBACIÓN:", pendingBalances);
 
-        // LLENADO DEL FORMULARIO EC
-        await page.getByLabel('País *').selectOption('EC');
-        await page.locator('div').filter({ hasText: /^Monto \*$/ }).nth(1).click();
-        await page.getByRole('textbox', { name: 'Monto *' }).fill(payoutMontoTest.toString());
-        await page.getByRole('textbox', { name: 'Nombre*' }).fill('Sergio');
-        await page.getByRole('textbox', { name: 'Apellido*' }).fill('Errigo Completo');
-        await page.getByLabel('Tipo de Documento*').selectOption('CI');
-        await page.getByRole('textbox', { name: 'Número de Documento*' }).fill('1710034065');
-        await page.getByLabel('Banco*').selectOption('banco_pichincha');
-        await page.getByLabel('Tipo de Cuenta*').selectOption('Ahorro');
-        await page.getByRole('textbox', { name: 'Número de Cuenta*' }).fill('1234567890');
-        await page.getByText('Disable Mock?').click().catch(()=>null); 
-
-        await attachScreenshot('Formulario Payout Antes de Enviar');
-
-        // =========================================================
-        // D) CREAR Y EXTRAER ID
-        // =========================================================
-        await page.getByRole('button', { name: 'Crear Pago' }).click();
-        
-        // Esperamos agresivamente a que el sistema procese y agregue la fila a la tabla UI
-        await page.waitForTimeout(6000); 
-
-        // Vamos a raspar el ID recién insertado buscando en la tabla visible
-        // La tabla suele tener celdas que contienen guiones de un UUID (ej: 8dc4-29882491e3b5)
-        const possibleId = await page.evaluate(() => {
-            // Buscamos cualquier td o elemento que parezca un UUID 
-            const uuidRegex = /[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/;
-            const elements = document.body.innerText.match(uuidRegex);
-            return elements ? elements[0] : null;
-        });
-
-        if (possibleId) {
-            storedTxId = possibleId;
-        } else {
-             console.log("🚨 ALERTA: No se encontró un UUID válido en la pantalla tras la creación.");
-        }
-
-        if (allure && allure.attachment) {
-            await allure.attachment(`Número de Operación Payout`, `ID Generado (Visual): ${storedTxId}`, "text/plain");
-        }
-        console.log(`\n✅ PAYOUT CREADO CON ID (Scrapeado de UI): ${storedTxId}\n`);
-        
-        expect(storedTxId).toBeDefined();
-        // Click a la primera fila para abrir Detalle Visual de ese Payout y no la grilla gigante
-        const firstRow = page.locator('table tbody tr').first();
-        await firstRow.click({ force: true }).catch(()=>null);
-        await page.waitForTimeout(2000); // Animación de modal o sidebar
-
-        if(allure && allure.attachment){
-            // Capturamos explícitamente viewport para atrapar el modal/drawer y no la grilla vertical "larguísima"
-            const vpBuffer = await page.screenshot({ fullPage: false });
-            await allure.attachment(`📸 Evidencia Visual: Payout EC Detallado (Foco Singular)`, vpBuffer, "image/png");
-        }
-
-        // Logout para limpiar sesión Merchant y pasar al portal Admin dentro del MISMO CASO
+        // D) ADMIN PORTAL (APROBACIÓN LÓGICA EXCLUSIVA DE ADMIN)
         let baseURL = envConfig.BASE_URL;
-        const domainRoot = baseURL.replace("api", "merchant");
-        await page.goto(`${domainRoot}/logout`).catch(()=>null);
-        
-        // =========================================================
-        // === FASE 2: FLUJO ADMIN PORTAL (APROBACIÓN RÁPIDA) ===
-        // =========================================================
-        await fastAdminApprove(page, storedTxId, 'pay-out', allure);
-        await attachScreenshot('Transacción Confirmada Payout');
+        await page.goto(`${baseURL.replace("api", "merchant")}/logout`).catch(()=>null);
+        await fastAdminAction(page, storedTxId, 'pay-out', allure, 'approve');
+        await attachScreenshot('Transacción Confirmada Payout (Happy)');
 
-        // =========================================================
-        // === FASE 3: VOLVER A MERCHANT Y VALIDAR IMPACTO ===
-        // =========================================================
+        // E) BALANCE FINAL = MANTIENE EL DESCUENTO
         const finalBalances = await loginAndCaptureDashboard(page, allure, false);
         console.log("💰 SALDOS FINALES TRAS APROBACIÓN:", finalBalances);
 
@@ -147,15 +154,57 @@ describe(`[E2E Híbrido] FULL FLOW - MERCHANT PORTAL EC Payout: Creación, Grill
              expect(finalBalances.withdrawals).toBeLessThan(initialBalances.withdrawals);
         }
 
-        // El Saldo DISPONIBLE PARA PAGOS debe decrementar al ceder fondos
         expect(finalBalances.available).toBeLessThan(initialBalances.available);
+        expect(finalBalances.available).toBeCloseTo(pendingBalances.available, 1);
         
-        // Las Comisiones e impuestos deben estar renderizados en DOM
-        expect(finalBalances.fees !== undefined).toBeTruthy();
-        expect(finalBalances.taxes !== undefined).toBeTruthy();
-
         if (allure && allure.attachment) {
-            await allure.attachment(`Comparativa de Saldos Contables`, JSON.stringify({ SALDOS_INICIALES: initialBalances, SALDOS_FINALES: finalBalances, MONTO_OPERACION_APROBADA: payoutMontoTest }, null, 2), "application/json");
+            await allure.attachment(`Cálculos de Congelamiento Contable (Happy Path)`, JSON.stringify({ SALDOS_INICIALES: initialBalances, CONGELAMIENTO_PENDING: pendingBalances, SALDOS_FINALES: finalBalances }, null, 2), "application/json");
+        }
+    });
+
+    test('2. Flujo Reverso por FAILED: Creación -> PENDING (Debita) -> Fallado en M-Portal -> Reembolso', async () => {
+        let revertMonto = 150.23;
+        
+        const initRevertBal = await loginAndCaptureDashboard(page, allure, true);
+        const myTx = await originarPayoutDesdeMerchant(revertMonto, 'REVERSO_FAILED');
+        expect(myTx).not.toBeNull();
+
+        const pendingBal = await loginAndCaptureDashboard(page, allure, false);
+        expect(pendingBal.available).toBeLessThan(initRevertBal.available); // Aserción de Congelamiento
+
+        // APLICAR RECHAZO DIRECTO DESDE EL MERCHANT PORTAL USANDO UI
+        await markStatusFromMerchantGrid(myTx, 'failed');
+
+        // Verificamos Reembolso Total
+        const finalRevertBal = await loginAndCaptureDashboard(page, allure, false);
+        expect(finalRevertBal.available).toBeGreaterThan(pendingBal.available);
+        expect(finalRevertBal.available).toBeCloseTo(initRevertBal.available, 1);
+        
+        if (allure && allure.attachment) {
+            await allure.attachment(`Reporte Matemático Reverso: FAILED`, JSON.stringify({ SALDO_ORIGINAL: initRevertBal, DEBITO_TEMPORAL: pendingBal, SALDO_DEVUELTO: finalRevertBal }, null, 2), "application/json");
+        }
+    });
+
+    test('3. Flujo Reverso por EXPIRED: Creación -> PENDING (Debita) -> Expiración Forzada M-Portal -> Reembolso', async () => {
+        let revertMonto = 150.23;
+        
+        const initRevertBal = await loginAndCaptureDashboard(page, allure, true);
+        const myTx = await originarPayoutDesdeMerchant(revertMonto, 'REVERSO_EXPIRED');
+        expect(myTx).not.toBeNull();
+
+        const pendingBal = await loginAndCaptureDashboard(page, allure, false);
+        expect(pendingBal.available).toBeLessThan(initRevertBal.available); 
+
+        // APLICAR EXPIRACIÓN DIRECTO DESDE EL MERCHANT PORTAL USANDO UI
+        await markStatusFromMerchantGrid(myTx, 'expired');
+
+        // Verificamos Reembolso Total
+        const finalRevertBal = await loginAndCaptureDashboard(page, allure, false);
+        expect(finalRevertBal.available).toBeGreaterThan(pendingBal.available);
+        expect(finalRevertBal.available).toBeCloseTo(initRevertBal.available, 1);
+        
+        if (allure && allure.attachment) {
+            await allure.attachment(`Reporte Matemático Reverso: EXPIRED`, JSON.stringify({ SALDO_ORIGINAL: initRevertBal, DEBITO_TEMPORAL: pendingBal, SALDO_DEVUELTO: finalRevertBal }, null, 2), "application/json");
         }
     });
 

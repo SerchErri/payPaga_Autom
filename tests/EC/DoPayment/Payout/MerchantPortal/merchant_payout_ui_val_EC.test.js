@@ -1,5 +1,7 @@
 const { chromium } = require('playwright');
 const allure = require('allure-js-commons');
+const { getAccessToken } = require('../../../../../utils/authHelper');
+const { preLoadFunds } = require('../../../../../utils/uiBalanceHelper');
 const envConfig = require('../../../../../utils/envConfig');
 
 jest.setTimeout(1800000);
@@ -17,6 +19,11 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
         sharedPage = await context.newPage();
         
         sharedPage.setDefaultTimeout(10000);
+        
+        try {
+            const token = await getAccessToken();
+            await preLoadFunds(sharedPage, token, allure, 10000.00);
+        } catch(e) { console.error("Fallo AutoFondeando", e); }
         
         let baseURL = envConfig.BASE_URL;
         const domainRoot = baseURL.replace("api", "merchant");
@@ -56,9 +63,10 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
 
     const typeSafe = async (page, nameSelectorParams, textToType) => {
         const loc = page.getByRole('textbox', nameSelectorParams).first();
-        await loc.clear({ timeout: 2000 }).catch(()=>null);
+        await loc.click({ timeout: 3000 }).catch(()=>null);
+        await loc.fill('', { timeout: 3000 }).catch(()=>null); 
         if (textToType !== null && textToType !== undefined) {
-             await loc.pressSequentially(textToType, { delay: 10, timeout: 5000 });
+             await loc.pressSequentially(textToType, { delay: 10, timeout: 5000 }).catch(()=>null);
         }
     };
 
@@ -127,9 +135,13 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
     };
 
     const fillBaseForm = async (page) => {
-        if (page.url() !== formUrl) {
-            await page.goto(formUrl, { waitUntil: 'domcontentloaded' });
-            await page.waitForSelector('text=Monto', { timeout: 15000 }).catch(()=>null);
+        if (!page.url().includes('/create')) {
+            await page.getByRole('link', { name: ' Transacciones ' }).first().click({ timeout: 5000 }).catch(()=>null);
+            await page.waitForTimeout(500);
+            await page.getByRole('link', { name: 'Transacciones de Salida' }).first().click({ timeout: 5000 }).catch(()=>null);
+            await page.waitForTimeout(500);
+            await page.getByRole('link', { name: 'Crear Pago' }).first().click({ timeout: 5000 }).catch(()=>null);
+            await page.waitForTimeout(2000);
         }
 
         const bancosConfig = ['banco_pichincha', 'banco_guayaquil', 'produbanco'];
@@ -139,7 +151,7 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
 
         await page.getByLabel('País *').selectOption('EC').catch(()=>null);
         await page.waitForTimeout(2000); // ⏳ ESPERA A QUE CARGUE LA LISTA DE BANCOS 
-        await typeSafe(page, { name: 'Monto *' }, '100.00');
+        await typeSafe(page, { name: 'Monto *' }, '150.23');
         await typeSafe(page, { name: 'Nombre*' }, 'Sergio');
         await typeSafe(page, { name: 'Apellido*' }, 'Errigo');
         await page.getByLabel('Tipo de Documento*').selectOption('CI').catch(()=>null);
@@ -415,6 +427,39 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
             await typeSafe(sharedPage, { name: 'Número de Cuenta*' }, '123456X89!'); 
             await attemptSubmit(sharedPage); 
             const r = await attachEvidence('Cuenta Letras y Simb', sharedPage, "Cuenta: Alfanumerica");
+            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
+        });
+
+        test('5.4. Bank: Ausencia de Banco Seleccionado (Omitir)', async () => {
+            await fillBaseForm(sharedPage);
+            // Forza deseleccionar (Opción "Seleccione un Banco" que suele ser index 0 o string vacío)
+            await sharedPage.getByLabel('Banco*').selectOption({index: 0}).catch(()=>null);
+            await attemptSubmit(sharedPage);
+            const r = await attachEvidence('Banco - Omitido', sharedPage, "Banco: (Vacio)");
+            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
+        });
+
+        test('5.5. Account Type: Enumeradores Inválidos (VISTA)', async () => {
+            await fillBaseForm(sharedPage);
+            const selector = sharedPage.getByLabel('Tipo de Cuenta*').first();
+            const textoDropdown = await selector.innerText();
+            if (allure && allure.attachment) {
+                try {
+                    await selector.click();
+                    await sharedPage.waitForTimeout(500);
+                    const buffer = await sharedPage.screenshot({ fullPage: true });
+                    allure.attachment("📸 Evidencia Dropdown Cuenta (Sin VISTA)", buffer, "image/png");
+                    await sharedPage.mouse.click(0, 0); 
+                } catch(e) {}
+            }
+            expect(textoDropdown.toLowerCase().includes('vista')).toBe(false); 
+        });
+
+        test('5.6. Account Number: Omitido (Vacío)', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, { name: 'Número de Cuenta*' }, null); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('Cuenta Omitida', sharedPage, "Cuenta: (Nula)");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
     });

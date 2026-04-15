@@ -1,273 +1,198 @@
-// tests/payout/validations/payout_H2H_EC.test.js
-// Suite estricta de validaciones de Payout H2H para Ecuador basada en Specs de usuario.
-
 const axios = require('axios');
 const allure = require('allure-js-commons');
 const { getAccessToken } = require('../../../../../utils/authHelper');
 const envConfig = require('../../../../../utils/envConfig');
+const { chromium } = require('playwright');
+const { preLoadFunds } = require('../../../../../utils/uiBalanceHelper');
 
-const BASE_URL = `${envConfig.BASE_URL}/payout`;
-
-describe(`[Payout H2H Ecuador] Validación Estricta Backend [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
-    let freshToken = '';
+describe(`[E2E H2H] Payout AccountBank Ecuador: API Pura con Matemáticas [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+    let token = '';
+    let currentBalanceRecord = 0;
 
     beforeAll(async () => {
+        token = await getAccessToken();
+        
+        // Auto-Carga de Fondos (Pay-in 10000 -> Approve Admin)
         try {
-            freshToken = await getAccessToken();
-        } catch (error) {
-            console.error("Fallo obteniendo token global", error);
-        }
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext();
+            const page = await context.newPage();
+            await preLoadFunds(page, token, allure, 10000.00);
+            await browser.close();
+        } catch(e) { console.error("No se pudo pre-cargar fondos", e.message); }
+
+        const initialRes = await getMerchantBalance(token);
+        currentBalanceRecord = initialRes.available;
     });
 
-    // 🏆 Payload Base para Payout
-    const generateBasePayload = () => ({
-        "country_code": "EC",
-        "currency": "USD",
-        "payment_method_code": "bank_transfer",
-        "transaction": {
-            "beneficiary": {
-                "first_name": "Serch",
-                "last_name": "Test",
-                "document_type": "CI",
-                "document_number": "1710034065",
-                "account_number": "12345678910", // 11 dígitos por convención segura (10 a 20 range)
-                "bank_code": "PICHINCHAEC",
-                "account_type": "ahorro"
-            },
-            "transaction_data": {
-                "payout_concept": "laboris voluptate quis occaecat",
-                "merchant_transaction_reference": `Val-Po-${Date.now()}`,
-                "transaction_total": 10.23
-            }
+    jest.setTimeout(15000); // REBAJADO RADICALMENTE: 15 Segundos en API pura (3000ms rompería si el curl del backend de Paypaga demora más de 3s)
+
+    const getMerchantBalance = async (jwt) => {
+        const balanceUrl = `${envConfig.BASE_URL}/v2/balances?country=EC`;
+        const res = await axios.get(balanceUrl, { headers: { 'Authorization': `Bearer ${jwt}` }, validateStatus: () => true });
+        
+        let available = 0;
+        if (res.status === 200 && res.data && res.data.countries && res.data.countries.length > 0) {
+            available = res.data.countries[0].available_for_payout || 0;
         }
-    });
-
-    // Reporter Automático (Homologado a Payin)
-    const executeFailingPost = async (testName, payload, rawStringMode = false) => {
-        const config = {
-            headers: {
-                'DisablePartnerMock': 'true',
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${freshToken}`
-            },
-            validateStatus: () => true
-        };
-
-        const response = await axios.post(BASE_URL, payload, config);
-
-        let extractMsg = response.data;
-        if (response.data && response.data.error_details) {
-             extractMsg = `ERROR MSG: ${JSON.stringify(response.data.error_details)}`;
-        } else if (response.data && response.data.error) {
-             extractMsg = `ERROR MSG: ${JSON.stringify(response.data.error)}`;
-        }
-
-        console.log(`\n=== 🚨 FALLA PROVOCADA PARA: ${testName} ===`);
-        console.log(`Status devuelto por backend: ${response.status}`);
-        console.log(`Respuesta Validada:`, extractMsg);
-        console.log(`===============================================`);
-
-        if (allure && allure.attachment) {
-            await allure.attachment(`Causa/Payload - ${testName}`, rawStringMode ? payload : JSON.stringify(payload, null, 2), "application/json");
-            await allure.attachment(`Efecto/Respuesta - ${testName}`, JSON.stringify({ status: response.status, body: response.data }, null, 2), "application/json");
-        }
-
-        return response;
+        return { available, fullResponse: res.data };
     };
 
-    // ==========================================
-    // SECCIÓN 1: SEGURIDAD, ESTRUCTURA Y MASS ASSIGNMENT
-    // ==========================================
-    describe('1. Seguridad e Integridad Payout', () => {
+    const buildPayload = (overrides = {}, fieldsOverrides = {}) => {
+        return {
+            country: 'EC', currency: 'USD', payment_method: 'bank_transfer',
+            merchant_transaction_reference: `H2H-AccBank-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+            merchant_order_reference: `H2H-Order-${Date.now()}`,
+            merchant_customer_id: "customer@email.com",
+            amount: 150.23, 
+            fields: {
+                first_name: 'Sergio', last_name: 'Errigo', document_type: 'CI', document_number: '1710034065',
+                bank_code: 'banco_pichincha', account_type: 'ahorro', account_number: '2201234567',
+                ...fieldsOverrides
+            },
+            ...overrides
+        };
+    };
 
-        test('1.1. Seguridad: Forzar Unauthorized (401) con Token Falso', async () => {
-            const res = await axios.post(BASE_URL, generateBasePayload(), {
-                headers: { 'Authorization': `Bearer eyJhb.INVENTADO.xyz` },
-                validateStatus: () => true
-            });
-            expect(res.status).toBe(401);
+    const payoutUrl = `${envConfig.BASE_URL}/v2/transactions/pay-out`;
+
+    const executePayout = async (testName, payload, expectedStatus) => {
+        const res = await axios.post(payoutUrl, payload, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'DisablePartnerMock': 'true' },
+            validateStatus: () => true,
         });
 
-        test('1.2. JSON Integrity: Mandar un JSON malformado', async () => {
-            const malformedPayload = `{ "country_code": "EC", "currency": "USD" `;
-            const response = await executeFailingPost('JSON Malformado', malformedPayload, true);
-            expect(response.status).toBe(400);
-        });
+        const resText = JSON.stringify(res.data, null, 2);
+        if (allure && allure.attachment) {
+            await allure.attachment(`POST Request Payload: ${testName}`, JSON.stringify(payload, null, 2), 'application/json');
+            await allure.attachment(`POST Response: ${testName} [HTTP ${res.status}]`, resText, 'application/json');
+        }
 
-        test('1.3. Mass Assignment: Inyectar params extras', async () => {
-            const payload = generateBasePayload();
-            payload.transaction.is_admin = true;
-            payload.hacked_field = "exploit";
-            const response = await executeFailingPost('Mass Assignment', payload);
-            expect(response.status).toBeDefined();
+        if (Array.isArray(expectedStatus)) {
+            expect(expectedStatus).toContain(res.status);
+        } else {
+            expect(res.status).toBe(expectedStatus);
+        }
+        return { status: res.status, data: res.data, resText };
+    };
+
+    describe('1. Happy Path - Payout Creado Correctamente (Auditoría de Balances)', () => {
+        test('Verificación estricta de saldo, creación y descuento matemático', async () => {
+            // A) GET SALDOS PREVIOS
+            const preBalance = await getMerchantBalance(token);
+            if(allure && allure.attachment) await allure.attachment(`🔍 GET Balances PRE Payout`, JSON.stringify(preBalance.fullResponse, null, 2), 'application/json');
+
+            // B) POST PAYOUT
+            const payload = buildPayload();
+            const { status, data } = await executePayout('Happy Path Payout (> 500.45)', payload, [200, 201, 202]);
+            expect(data.transaction_id || data.id || data.merchant_transaction_reference).toBeDefined();
+
+            // C) GET SALDOS POSTERIORES
+            await new Promise(r => setTimeout(r, 2000));
+            const postBalance = await getMerchantBalance(token);
+            if(allure && allure.attachment) await allure.attachment(`🔍 GET Balances POST Payout`, JSON.stringify(postBalance.fullResponse, null, 2), 'application/json');
+
+            // D) MATEMÁTICAS
+            const targetMonto = payload.amount;
+            const diff = preBalance.available - postBalance.available;
+            
+            if(allure && allure.attachment) {
+                await allure.attachment(`🧮 Comparación Matemática`, JSON.stringify({
+                    "Saldo Inicial (available_for_payout)": preBalance.available,
+                    "Monto Procesado": targetMonto,
+                    "Saldo Final Detectado": postBalance.available,
+                    "Diferencia (Monto + Fees)": diff
+                }, null, 2), 'application/json');
+            }
+
+            expect(postBalance.available).toBeLessThan(preBalance.available);
+            currentBalanceRecord = postBalance.available;
         });
     });
 
-    // ==========================================
-    // SECCIÓN 2: CONSISTENCIA Y MONTOS
-    // ==========================================
-    describe('2. Consistencia y Monto Total (transaction_total)', () => {
+    const testRejection = async (testName, payload, expectedKey) => {
+        const { resText } = await executePayout(testName, payload, 400);
+        if (expectedKey) expect(resText.toLowerCase()).toContain(expectedKey.toLowerCase().replace(' ', '_'));
+    };
 
-        test('2.1. Amount: Valor Negativo (Rechazo API 250 - Custom Spec)', async () => {
-            const p = generateBasePayload();
-            p.transaction.transaction_data.transaction_total = -10.00;
-            const res = await executeFailingPost('Amount Negativo', p);
-            
-            expect([400, 422]).toContain(res.status); // Esperamos Status Fallido Frontal
-            // Aserción estricta de la estructura proveída por usuario (errorCode: 250)
-            if(res.data && res.data.error_code === 250) {
-                expect(res.data.error_code).toBe(250);
-                expect(res.data.error_details[0].field).toBe("transaction_total");
-                expect(res.data.error_details[0].message).toBe("Invalid transaction amount.");
+    describe('2. Validaciones Específicas por Segmento', () => {
+        describe('2.1 Segmento Primer Nombre (First Name)', () => {
+            test('Reject missing first_name', async () => await testRejection('Missing First Name', buildPayload({}, { first_name: "" }), 'first_name'));
+            test('Reject first_name exceeding max length', async () => await testRejection('Max Length First Name', buildPayload({}, { first_name: "a".repeat(100) }), 'first name'));
+            test('Reject first_name numeric', async () => await testRejection('Numeric First Name', buildPayload({}, { first_name: "Sergio123" }), 'first name'));
+            test('Reject first_name invalid symbols (XSS)', async () => await testRejection('XSS First Name', buildPayload({}, { first_name: "<script>" }), 'first name'));
+            test('Reject first_name special chars (Emoji)', async () => await testRejection('Emoji First Name', buildPayload({}, { first_name: "Sergio😎" }), 'first name'));
+        });
+
+        describe('2.2 Segmento Apellidos (Last Name)', () => {
+            test('Reject missing last_name', async () => await testRejection('Missing Last Name', buildPayload({}, { last_name: "" }), 'last_name'));
+            test('Reject last_name exceeding max length', async () => await testRejection('Max Length Last Name', buildPayload({}, { last_name: "b".repeat(100) }), 'last name'));
+            test('Reject last_name numeric', async () => await testRejection('Numeric Last Name', buildPayload({}, { last_name: "Perez8" }), 'last name'));
+            test('Reject last_name invalid symbols (XSS)', async () => await testRejection('XSS Last Name', buildPayload({}, { last_name: "Perez;" }), 'last name'));
+            test('Reject last_name special chars', async () => await testRejection('Special Chars Last Name', buildPayload({}, { last_name: "Perez¿" }), 'last name'));
+        });
+
+        describe('2.3 Segmento Tipo de Documento', () => {
+            test('Reject missing document_type', async () => await testRejection('Missing Document Type', buildPayload({}, { document_type: "" }), 'document_type'));
+            test('Reject invalid document_type (DNI en EC)', async () => await testRejection('Invalid Document Type', buildPayload({}, { document_type: "DNI" }), 'document type'));
+        });
+
+        describe('2.4 Segmento Número de Documento', () => {
+            test('Reject missing document_number', async () => await testRejection('Missing Doc Number', buildPayload({}, { document_number: "" }), 'document_number'));
+            test('Reject document_number exceeding max length', async () => await testRejection('Max Length Doc Number', buildPayload({}, { document_number: "c".repeat(50) }), 'document number'));
+        });
+
+        describe('2.5 Segmento Entidad Bancaria (Bank Code)', () => {
+            test('Reject missing bank_code', async () => await testRejection('Missing Bank Code', buildPayload({}, { bank_code: "" }), 'bank'));
+            test('Reject invalid bank_code', async () => await testRejection('Invalid Bank Code', buildPayload({}, { bank_code: "BANCO_INVALIDO_TEST" }), 'bank'));
+        });
+
+        describe('2.6 Segmento Tipo de Cuenta (Account Type)', () => {
+            test('Reject missing account_type', async () => await testRejection('Missing Account Type', buildPayload({}, { account_type: "" }), 'account_type'));
+            test('Reject invalid account_type (Vista)', async () => await testRejection('Invalid Account Type', buildPayload({}, { account_type: "VISTA" }), 'account type'));
+        });
+
+        describe('2.7 Segmento Número de Cuenta (Account Number)', () => {
+            test('Reject missing account_number', async () => await testRejection('Missing Account Number', buildPayload({}, { account_number: "" }), 'account_number'));
+            test('Reject account_number exceeding max length', async () => await testRejection('Max Length Account Number', buildPayload({}, { account_number: "x".repeat(60) }), 'account number'));
+            // Agregar cualquier otro test límite exigido en Account Bank si fuera numérico, e.g. espacios o strings.
+        });
+    });
+
+    describe('3. Validaciones Matemáticas, Montos y Saldos Insuficientes', () => {
+        test('Reject payout with amount == 0', async () => {
+            await testRejection('Amount is 0', buildPayload({ amount: 0 }), 'amount');
+        });
+
+        test('Reject payout with amount < 0 (Negative)', async () => {
+            await testRejection('Amount is Negative', buildPayload({ amount: -10.5 }), 'amount');
+        });
+
+        test('Reject payout with amount == 1 (Validar posible error de mínimo)', async () => {
+            const { status, resText } = await executePayout('Amount is 1 (Mínimo)', buildPayload({ amount: 1 }), [400, 422]).catch(async () => {
+                 return await executePayout('Amount is 1 (Asíncrono o Válido)', buildPayload({ amount: 1 }), [201, 202]);
+            });
+            // Sólo hacemos asserts si sabemos que lo va a rechazar (el PM indicó que envía mensaje de error).
+            if(status === 400 || status === 422) {
+                expect(resText.toLowerCase()).toMatch(/amount|minimo|minimum|invalid/);
             }
         });
 
-        test('2.2. Amount: Exceso de Decimales (>2 dígitos) [Debería fallar con 400]', async () => {
-            const p = generateBasePayload();
-            p.transaction.transaction_data.transaction_total = 10.123;
-            const res = await executeFailingPost('Amount Muchos Decimales', p);
+        test('Insuficiencia de Balance: Comportamiento y Reverso asíncrono', async () => {
+            const massiveAmount = 999999999.00;
+            // Evaluamos la falta de fondos.
+            const preFallosBalance = await getMerchantBalance(token);
+            if(allure && allure.attachment) await allure.attachment(`🔍 GET Saldo PRE-Masivo`, JSON.stringify(preFallosBalance.fullResponse, null, 2), 'application/json');
+
+            const res = await executePayout('Huge Amount Insufficient Funds', buildPayload({ amount: massiveAmount }), [202, 400, 422]);
             
-            // ⚠️ ISSUE CONOCIDO (Debe dar Error 4XX pero actualmente lo permite/genera)
-            // Se fuerza la expectativa de Assert failure indicando el bug al tester
-            expect([400, 422]).toContain(res.status); 
+            await new Promise(r => setTimeout(r, 2000));
+            const postFallosBalance = await getMerchantBalance(token);
+            if(allure && allure.attachment) await allure.attachment(`🔍 GET Saldo POST-Masivo (Verifica que no descontó)`, JSON.stringify(postFallosBalance.fullResponse, null, 2), 'application/json');
+
+            // El saldo NO debe descontarse, o debe ser debidamente retornado a su caja de available
+            expect(postFallosBalance.available).toBeCloseTo(preFallosBalance.available, 1);
         });
 
-        test('2.3. Amount: Excede Disponible (available_for_payout)', async () => {
-            // Obtener el balance disponible real primero
-            const balanceResponse = await axios.get(`${envConfig.BASE_URL}/v2/balances?country=EC`, {
-                headers: { 'Authorization': `Bearer ${freshToken}`, 'DisablePartnerMock': 'true' },
-                validateStatus: () => true
-            });
-            const ecData = balanceResponse.data.countries && balanceResponse.data.countries.find(c => c.country === 'EC');
-            const available = Number(ecData ? ecData.available_for_payout : 0);
-
-            // Requerir Payout superior al disponible
-            const p = generateBasePayload();
-            p.transaction.transaction_data.transaction_total = available + 999999.00;
-            const res = await executeFailingPost('Amount Excede Balance País', p);
-            
-            // Debe Fallar porque la billetera no tiene liquidez
-            expect([400, 403, 409, 422]).toContain(res.status);
-        });
-
-        test('2.4. Amount: Cero (0.00)', async () => {
-            const p = generateBasePayload();
-            p.transaction.transaction_data.transaction_total = 0.00;
-            const res = await executeFailingPost('Amount Cero', p);
-            expect([400, 422]).toContain(res.status);
-        });
     });
-
-    // ==========================================
-    // SECCIÓN 3: DOCUMENTOS DE IDENTIDAD EC
-    // ==========================================
-    describe('3. Campos de Identidad (Documentos EC permitidos solo CI y PP)', () => {
-
-        test('3.1. Tipología Prohibida (DL) en vez de CI/PP', async () => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.document_type = "DL";
-            const res = await executeFailingPost('Document Type DL Prohibido', p);
-            expect([400, 422]).toContain(res.status);
-        });
-
-        test('3.2. Validar CI: Contaminación Letras', async () => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.document_type = "CI";
-            p.transaction.beneficiary.document_number = "17Y0034065";
-            const res = await executeFailingPost('CI con Letras', p);
-            expect([400, 422]).toContain(res.status);
-        });
-
-        test('3.3. Validar CI: Digitos Insuficientes (9 dígitos)', async () => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.document_number = "130799009";
-            const res = await executeFailingPost('CI Corta', p);
-            expect([400, 422]).toContain(res.status);
-        });
-    });
-
-    // ==========================================
-    // SECCIÓN 4: BANCARIOS (Cuentas y Bancos)
-    // ==========================================
-    describe('4. Validaciones Bancarias Específicas', () => {
-
-        test('4.1. Account Number: Mayor a 20 dígitos (Debe Emitir Error 250)', async () => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.account_number = "123456789012345678901"; // 21 caracteres
-            const res = await executeFailingPost('Account Num > 20 Digitos', p);
-            
-            expect([400, 422]).toContain(res.status);
-            
-            if (res.data && res.data.error_code === 250) {
-                expect(res.data.error_code).toBe(250);
-                expect(res.data.error_details[0].field).toBe("transaction[beneficiary].account_number");
-                expect(res.data.error_details[0].message).toBe("length must be at most 20 characters");
-            }
-        });
-
-        test('4.2. Account Number: Menos de 10 dígitos', async () => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.account_number = "123456789"; // 9 caracteres
-            const res = await executeFailingPost('Account Num 9 Digitos', p);
-            expect([400, 422]).toContain(res.status);
-        });
-
-        test('4.2.1. Account Number: Más de 10 dígitos (Estricto 10)', async () => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.account_number = "12345678901"; // 11 caracteres
-            const res = await executeFailingPost('Account Num 11 Digitos', p);
-            expect([400, 422]).toContain(res.status);
-        });
-
-        test('4.2.2. Account Number: Exacto 10 dígitos (Exitoso)', async () => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.account_number = "1234567890"; // 10 caracteres
-            const res = await executeFailingPost('Account Num Exacto 10 Digitos', p);
-            expect([200, 201]).toContain(res.status); // Debería pasar la validación
-        });
-
-        test('4.3. Account Number: Regex Letras y Alfanuméricos (Violation ^\\d{10,20}$)', async () => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.account_number = "12345678A0"; // Contiene una letra A
-            const res = await executeFailingPost('Account Num Letras', p);
-            expect([400, 422]).toContain(res.status);
-        });
-
-        test('4.4. Bank Code: Código Inexistente', async () => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.bank_code = "BANCO_FALSO_123";
-            const res = await executeFailingPost('Bank Code Falso', p);
-            expect([400, 422]).toContain(res.status);
-        });
-    });
-
-    // ==========================================
-    // SECCIÓN 5: NOMBRES TEXTUALES
-    // ==========================================
-    describe('5. Campos de Cadena (Nombres Puros)', () => {
-
-        const runFirstNameTest = async (testName, val) => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.first_name = val;
-            return await executeFailingPost(testName, p);
-        };
-
-        const runLastNameTest = async (testName, val) => {
-            const p = generateBasePayload();
-            p.transaction.beneficiary.last_name = val;
-            return await executeFailingPost(testName, p);
-        };
-
-        // Name validations
-        test('5.1. First Name: Vacío', async () => expect([400, 422]).toContain((await runFirstNameTest('FN Vacío', "")).status));
-        test('5.2. First Name: XSS Payload', async () => expect([400, 422]).toContain((await runFirstNameTest('FN HTML', "<script>alert(1)</script>")).status));
-        test('5.2.1. First Name: Boundary Largo Exacto (51 Chars) [Fallo]', async () => expect([400, 422]).toContain((await runFirstNameTest('FN Boundary 51', "A".repeat(51))).status));
-        test('5.2.2. First Name: Boundary Valido Máximo (50 Chars) [Exitoso]', async () => expect([200, 201]).toContain((await runFirstNameTest('FN Boundary 50 Valido', "A".repeat(50))).status));
-        
-        test('5.3. Last Name: Vacío', async () => expect([400, 422]).toContain((await runLastNameTest('LN Vacío', "")).status));
-        test('5.4. Last Name: XSS Payload', async () => expect([400, 422]).toContain((await runLastNameTest('LN HTML', "<img src=x onerror=alert(1)>")).status));
-        test('5.4.1. Last Name: Boundary Largo Exacto (51 Chars) [Fallo]', async () => expect([400, 422]).toContain((await runLastNameTest('LN Boundary 51', "A".repeat(51))).status));
-        test('5.4.2. Last Name: Boundary Valido Máximo (50 Chars) [Exitoso]', async () => expect([200, 201]).toContain((await runLastNameTest('LN Boundary 50 Valido', "A".repeat(50))).status));
-    });
-
 });

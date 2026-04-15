@@ -1,4 +1,5 @@
 const envConfig = require('./envConfig');
+const axios = require('axios');
 
 /**
  * Utilitario Core E2E: uiBalanceHelper
@@ -82,9 +83,9 @@ const loginAndCaptureDashboard = async (page, allure, isInitial = true) => {
 };
 
 /**
- * Se dirige silenciosamente al backend de Admin y dispara la aprobación bypasseando la UI lenta.
+ * Se dirige silenciosamente al backend de Admin y dispara la acción solicitada bypasseando la UI lenta.
  */
-const fastAdminApprove = async (page, txId, operationType = 'pay-out', allure) => {
+const fastAdminAction = async (page, txId, operationType = 'pay-out', allure, action = 'approve') => {
     let currentEnv = (envConfig.currentEnvName || "dev").toLowerCase();
     let adminUrl = `https://admin.v2.${currentEnv}.paypaga.com/login`;
 
@@ -101,21 +102,52 @@ const fastAdminApprove = async (page, txId, operationType = 'pay-out', allure) =
     
     await page.waitForTimeout(4000); 
 
-    // Disparar Aprobación (Soporta pay-out y pay-in de forma agnóstica basándose en la petición del user)
+    // Disparar Acción (Aprueba o Rechaza la Tx)
     const merchantId = envConfig.FRONTEND_PARAMS.merchantId;
-    const approveUrl = `https://admin.v2.${currentEnv}.paypaga.com/transactions/${operationType}/${txId}/approve?merchant_id=${merchantId}`;
+    const actionUrl = `https://admin.v2.${currentEnv}.paypaga.com/transactions/${operationType}/${txId}/${action}?merchant_id=${merchantId}`;
     
-    await page.goto(approveUrl, { waitUntil: 'domcontentloaded' });
+    await page.goto(actionUrl, { waitUntil: 'domcontentloaded' }).catch(()=>null);
     await page.waitForTimeout(2000); // Dar unos segundos al backend para liquidar
 
-    if (allure && allure.attachment) allure.attachment(`Aprobación Híbrida Ejecutada`, approveUrl, 'text/plain');
+    if (allure && allure.attachment) allure.attachment(`Aprobación Híbrida Ejecutada (${action.toUpperCase()})`, actionUrl, 'text/plain');
 
     // Logout
     await page.goto(`https://admin.v2.${currentEnv}.paypaga.com/logout`).catch(()=>null);
 };
 
+/**
+ * Automáticamente carga fondos a la cuenta usando un Pay-in fantasma y aprobándolo vía Admin, garantizando liquidez antes de correr suites.
+ */
+const preLoadFunds = async (page, token, allure, amountToLoad = 10000.00) => {
+    try {
+        const payinUrl = `${envConfig.BASE_URL}/v2/transactions/pay-in`;
+        const payload = {
+            country_code: 'EC', currency: 'USD', payment_method_code: 'bank_transfer',
+            transaction: {
+                beneficiary: { first_name: 'Auto', last_name: 'Funding', document_type: 'CI', document_number: '1710034065' },
+                transaction_data: { merchant_transaction_reference: `Fund-${Date.now()}`, transaction_total: amountToLoad }
+            }
+        };
+        const res = await axios.post(payinUrl, payload, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            validateStatus: () => true
+        });
+
+        if (res.status === 200 || res.status === 201 || res.status === 202) {
+            let txId = res.data.transaction_id || res.data.id || (res.data.details && res.data.details.transaction_processed && res.data.details.transaction_processed.transaction_id);
+            if (txId) {
+                await fastAdminAction(page, txId, 'pay-in', null, 'approve');
+                console.log(`[Auto-Funding] Inyectados $${amountToLoad} al balance del Merchant (TX: ${txId})`);
+            }
+        }
+    } catch(e) {
+        console.error("[Auto-Funding] Fallo silencioso fondeando la cuenta", e.message);
+    }
+};
+
 module.exports = {
     loginAndCaptureDashboard,
-    fastAdminApprove,
-    scrapeBalances
+    fastAdminAction,
+    scrapeBalances,
+    preLoadFunds
 };
