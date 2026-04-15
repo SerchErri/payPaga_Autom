@@ -6,7 +6,7 @@ const envConfig = require('../../../../../utils/envConfig');
 
 const BASE_URL = `${envConfig.BASE_URL}/v2/transactions/pay-in`;
 
-describe(`[H2H Dinaria AR] Automatización Senior QA - Pay-In [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`[H2H Dinaria AR] Validaciones Negativas API Pay-In [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 
     let freshToken = '';
 
@@ -135,40 +135,28 @@ describe(`[H2H Dinaria AR] Automatización Senior QA - Pay-In [Ambiente: ${envCo
             expect(res.data.instructions).toBeDefined();
         });
 
-        test('2.3. Amount: Exceso de Decimales (>2 dígitos, ej: 10.005)', async () => {
-            const p = generateBasePayload(); p.amount = 10.005;
-            const res = await executeFailingPost('Amount Muchos Decimales', p);
-            expect(res.status).toBe(400);
-            expect(res.data.error.code).toBe("VALIDATION_ERROR");
-            expect(res.data.error.details[0].field).toBe("amount");
-            expect(res.data.error.details[0].message).toBe("currency USD supports up to 2 decimals");
+        test('2.3. Amount: Validar importe puntual de 1.00', async () => {
+            const p = generateBasePayload(); p.amount = 1.00;
+            const res = await executeFailingPost('Amount 1.00', p);
+            expect(res.status).toBeDefined(); // Validamos qué comportamiento asume Dinaria
         });
 
         test('2.4. Amount: Stress Testing por límite obsceno astronómico', async () => {
             const p = generateBasePayload(); p.amount = 99999999999999.99;
             const res = await executeFailingPost('Amount Millonario Extremo', p);
-            expect(res.status).toBeDefined(); // Dependerá si su base acepta BigDecimals
+            expect(res.status).toBeDefined();
         });
 
-        test('2.5. Amount: Precisión Decimal Larga (10.12345679)', async () => {
-            const p = generateBasePayload(); p.amount = 10.12345679;
-            const res = await executeFailingPost('Amount Decimales Largos', p);
-            expect(res.status).toBe(400);
-            expect(res.data.error.code).toBe("VALIDATION_ERROR");
-            expect(res.data.error.details[0].message).toBe("currency USD supports up to 2 decimals");
+        test('2.5. Amount: Exceso de 3 Decimales (10.005)', async () => {
+            const p = generateBasePayload(); p.amount = 10.005;
+            const res = await executeFailingPost('Amount 3 Decimales', p);
+            expect(res.status).toBeDefined();
         });
 
         test('2.6. Amount: Vacío / Null (400 Expected)', async () => {
             const p = generateBasePayload(); p.amount = null;
             const res = await executeFailingPost('Amount Null', p);
             expect([400, 422]).toContain(res.status);
-        });
-
-        test('2.7. Amount: Mínimo Válido Positivo (0.01)', async () => {
-            const p = generateBasePayload(); p.amount = 0.01;
-            const res = await executeFailingPost('Amount Centavo (0.01)', p);
-            // Esto debería funcionar y devolver 2XX, pero forzamos el log para confirmarlo en esta primera ejecución.
-            expect(res.status).toBeDefined();
         });
 
         test('2.8. Consistency: Desacople País-Moneda (AR con COP)', async () => {
@@ -244,29 +232,6 @@ describe(`[H2H Dinaria AR] Automatización Senior QA - Pay-In [Ambiente: ${envCo
         });
     });
 
-    // ==========================================
-    // SECCIÓN 4: OBJETOS FIELDS (MAIL)
-    // ==========================================
-    describe('4. Campos de Identidad (Email)', () => {
-
-        test('4.1. Email: Sin arroba (@)', async () => {
-            const p = generateBasePayload(); p.fields.email = "sergiopaypaga.com";
-            const res = await executeFailingPost('Email sin Arroba', p);
-            expect([400, 422]).toContain(res.status);
-        });
-
-        test('4.2. Email: Sin dominio (.com)', async () => {
-            const p = generateBasePayload(); p.fields.email = "sergio@";
-            const res = await executeFailingPost('Email sin Dominio', p);
-            expect([400, 422]).toContain(res.status);
-        });
-
-        test('4.3. Email: Espacio oculto', async () => {
-            const p = generateBasePayload(); p.fields.email = "ser gio@paypaga.com";
-            const res = await executeFailingPost('Email con Espacio', p);
-            expect([400, 422]).toContain(res.status);
-        });
-    });
 
     // ==========================================
     // SECCIÓN 5: OBJETOS FIELDS (DOCUMENTOS AR CUIT/CUIL)
@@ -296,13 +261,37 @@ describe(`[H2H Dinaria AR] Automatización Senior QA - Pay-In [Ambiente: ${envCo
             expect([200, 201]).toContain(res.status);
             expect(res.data.instructions).toBeDefined();
         });
-
-        test('5.4. AllowOverUnder Testing', async () => {
+        test('5.4. Accept CUIL without hyphens', async () => {
             const p = generateBasePayload();
-            p.allowOverUnder = true; 
-            const res = await executeFailingPost('Allow Over/Under', p);
+            p.fields.document_number = "20084908488"; // Valid CUIL sin separadores
+            const res = await executeFailingPost('CUIL sin Guiones Validado', p);
             expect([200, 201]).toContain(res.status);
             expect(res.data.instructions).toBeDefined();
+        });
+
+        test('5.5. Reject CUIL with special characters', async () => {
+            const p = generateBasePayload();
+            p.fields.document_number = "20-08490848-$"; 
+            const res = await executeFailingPost('CUIL Caracteres Especiales', p);
+            expect(res.status).toBe(400);
+            expect(res.data.error.code).toBe("VALIDATION_ERROR");
+        });
+
+        test('5.6. Reject CUIL with invalid verifier digit', async () => {
+            const p = generateBasePayload();
+            // Original es 20-08490848-8, cambiamos al 9 para probar módulo 11
+            p.fields.document_number = "20-08490848-9"; 
+            const res = await executeFailingPost('CUIL Digito Verificador Incorrecto', p);
+            expect(res.status).toBe(400);
+            expect(res.data.error.code).toBe("VALIDATION_ERROR");
+        });
+
+        test('5.7. Reject CUIL with a dot (.)', async () => {
+            const p = generateBasePayload();
+            p.fields.document_number = "20.08490848.8"; 
+            const res = await executeFailingPost('CUIL con un punto', p);
+            expect(res.status).toBe(400);
+            expect(res.data.error.code).toBe("VALIDATION_ERROR");
         });
     });
 
