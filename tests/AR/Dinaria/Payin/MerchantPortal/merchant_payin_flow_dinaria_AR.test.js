@@ -1,25 +1,24 @@
 const { chromium } = require('playwright');
 const allure = require('allure-js-commons');
 const envConfig = require('../../../../../utils/envConfig');
-const { loginAndCaptureDashboard, fastAdminApprove } = require('../../../../../utils/uiBalanceHelper');
+const { loginAndCaptureDashboard, fastAdminAction } = require('../../../../../utils/uiBalanceHelper');
 
-// Tiempo global amplio porque es un flujo larguísimo de front-end
-jest.setTimeout(1800000);
+jest.setTimeout(1800000); // 30 Minutos
 
-describe(`MERCHANT PORTAL EC: Creación de Payment Link en [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`MERCHANT PORTAL AR: Payin Manual Flow (Dinaria) [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 
     let browser;
     let context;
     let page;
     let initialBalances = {};
-    let payinTestAmount = 100;
+    const transactionAmount = 1200.54;
 
     beforeAll(async () => {
         try {
-            // Se lanza el navegador
             browser = await chromium.launch({ headless: true });
             context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
             page = await context.newPage();
+            page.setDefaultTimeout(30000);
         } catch (e) { console.error("Fallo levantando Playwright", e); }
     });
 
@@ -27,141 +26,141 @@ describe(`MERCHANT PORTAL EC: Creación de Payment Link en [Amb: ${envConfig.cur
         if (browser) await browser.close();
     });
 
-    // Robot Tipográfico Seguro contra MaxLengths de React
+    // Escritura Segura Front-End React
     const typeSafe = async (selector, text) => {
         const el = page.locator(selector).first();
-        await el.clear({ timeout: 5000 }).catch(() => null);
-        await el.pressSequentially(text, { delay: 10, timeout: 5000 });
+        if (await el.isVisible().catch(() => false)) {
+            await el.clear({ timeout: 5000 }).catch(() => null);
+            await el.pressSequentially(text, { delay: 10, timeout: 5000 });
+        }
     };
 
     const attachScreenshot = async (name) => {
         if (allure && allure.attachment) {
             try {
+                await page.waitForTimeout(1000);
                 const buffer = await page.screenshot({ fullPage: true });
-                allure.attachment(`📸 Evidencia Visual: ${name}`, buffer, "image/png");
+                allure.attachment(`📸 Evidencia UI: ${name}`, buffer, "image/png");
             } catch (e) { }
         }
     };
 
-    test('Flujo Completo: UI Saldos -> Rellenar Formulario -> Validar Tabla -> Interceptar Safetypay', async () => {
+    test('Omnichannel: UI ARS Saldos -> UI Merchant Creacion -> Checkout Voucher UI -> Admin Approve -> Extracción Saldos', async () => {
         // =========================================================
-        // 1. INICIO DE SESIÓN Y REGISTRO DE SALDOS INICIALES
+        // 1. INICIO DE SESIÓN Y REGISTRO DE SALDOS (ARS)
         // =========================================================
-        initialBalances = await loginAndCaptureDashboard(page, allure, true);
-        console.log("📈 SALDOS INICIALES PAYIN (UI):", initialBalances);
+        console.log("-----------------------------------------");
+        console.log("➡️ Paso 1: Logueo en Merchant V2 y Rastreo de Saldo Inicial");
+        initialBalances = await loginAndCaptureDashboard(page, allure, true, 'AR');
+        console.log(`📈 SALDOS INICIALES CREADOS: ${JSON.stringify(initialBalances)}`);
+        
+        await attachScreenshot('Dashboard Merchant (Balance ARS)');
 
-        await attachScreenshot('Dashboard Merchant Tras Login');
-
         // =========================================================
-        // 2. NAVEGACIÓN LATERAL (DRAWER MENU)
+        // 2. NAVEGACIÓN LATERAL A "ENLACES DE PAGO"
         // =========================================================
-        // Abrir Hamburger Menu toggle (Playwright encontró 3 clones de diseño Mobile/Desktop, tomamos el visible)
+        console.log("➡️ Paso 2: Navegación por Drawer hacia Creador de Enlaces");
         const toggle = page.locator('.sidebar-toggle').first();
         if (await toggle.count() > 0 && await toggle.isVisible()) {
             await toggle.click();
-            await page.waitForTimeout(1000); // Animación css
+            await page.waitForTimeout(1000); 
         }
 
-        // Clic en Menú Principal: "Enlaces de Pago"
         const menuEnlaces = page.locator('span:has-text("Enlaces de Pago")').first();
         await menuEnlaces.waitFor({ state: 'visible', timeout: 8000 });
         await menuEnlaces.click();
         await page.waitForTimeout(500);
 
-        // Clic en Sub-menú: "Crear Enlace de Pago"
         const subCrearEnlace = page.locator('span:has-text("Crear Enlace de Pago")').first();
         await subCrearEnlace.waitFor({ state: 'visible', timeout: 8000 });
         await subCrearEnlace.click();
 
-        // Evidencia Formularios Abiertos
         await page.waitForSelector('#country', { timeout: 15000 });
-        await attachScreenshot('Formulario Creacion Enlace Vacío');
+        await attachScreenshot('Formulario UI Listo');
 
         // =========================================================
-        // 3. LLENADO DEL FORMULARIO EC (Happy Path Base)
+        // 3. LLENADO DEL FORMULARIO MERCHANT (AR)
         // =========================================================
-        await page.selectOption('#country', 'EC');
+        console.log("➡️ Paso 3: Población dinámica del Formulario (Argentina, 1200.54, Mock True)");
+        await page.selectOption('#country', 'AR');
+        
+        // Auto-hidratación de moneda
         const currencySelect = page.locator('#currency').first();
-        expect(await currencySelect.inputValue()).toBe('USD'); // Validar auto-hidratación
+        expect(await currencySelect.inputValue()).toBe('ARS'); 
 
-        await page.selectOption('#payment_method', 'bank_transfer');
-        await typeSafe('#amount', '100');
+        // Rellenar datos
+        await typeSafe('#amount', transactionAmount.toString());
         await typeSafe('#first_name', 'Sergio');
-        await typeSafe('#last_name', 'Errigo');
-        await typeSafe('#email', 'serrigo@paypaga.com');
-        await page.selectOption('#document_type', 'CI');
-        await typeSafe('#document_number', '1710034065');
+        await typeSafe('#last_name', 'MerchantTest');
+        await typeSafe('#email', 'merchant_payin@test.com');
+        
+        // En algunos entornos el documento no es restrictivo para generar link, pero aseguramos.
+        try {
+            await page.selectOption('#document_type', 'CUIL').catch(() => null);
+            await typeSafe('#document_number', '20275105792').catch(() => null);
+        } catch (e) {}
 
-        // El check disable mock
-        await page.check('#disable_mock').catch(() => null);
-        await attachScreenshot('Formulario Completado Listo Para Envio');
+        // Setear Mock. Existen checkboxes dependiendo de si es enable_mock o disable_mock env...
+        const chkEnableMock = page.locator('#enable_mock');
+        const chkDisableMock = page.locator('#disable_mock');
+        // El usuario solicitó `mock, true`, forzaremos la habilitación si existe, y desabilitaremos disable_mock si existe.
+        if (await chkEnableMock.count() > 0) await chkEnableMock.check().catch(()=>null);
+        if (await chkDisableMock.count() > 0) await chkDisableMock.uncheck().catch(()=>null);
 
-        // =========================================================
-        // 4. GUARDAR Y VALIDAR TABLA
-        // =========================================================
+        await attachScreenshot('Formulario Completado y Validado');
         await page.locator('#save').click();
 
-        // Redirige nativamente a la tabla de Enlaces
+        // =========================================================
+        // 4. AISLAR FILA DE LA GRILLA
+        // =========================================================
+        console.log("➡️ Paso 4: Transición a Grilla y Rastreo Fila...");
         await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => null);
-        await page.waitForSelector('span[data-state="pending"]', { timeout: 15000 }); // Esperamos pintar la grilla
+        await page.waitForSelector('span[data-state="pending"]', { timeout: 15000 }); 
 
-        await attachScreenshot('Tabla con Registro Insertado Exitosamente');
-
-        // Aserciones estrictas en la celda
         const tableContent = await page.locator('table').innerText().catch(() => page.innerText('body'));
-        expect(tableContent).toContain('100.00');
-        expect(tableContent).toContain('Transferencia bancaria');
-        expect(tableContent).toContain('USD');
-        expect(tableContent).toContain('EC');
-        expect(tableContent).toContain('Errigo');
-        expect(tableContent).toContain('1710034065');
+        expect(tableContent).toContain('1200.54');
+        expect(tableContent).toContain('ARS');
+        expect(tableContent).toContain('AR');
 
-        // Nos aseguramos que el badge sea Pending
-        const badgetPending = page.locator('span[data-state="pending"]').first();
-        expect(await badgetPending.isVisible()).toBe(true);
+        // Evidencia puntual a la Row
+        const firstTableRow = page.locator('tbody tr').first();
+        if (allure && allure.attachment) {
+            const buffer = await firstTableRow.screenshot().catch(()=>null);
+            if (buffer) allure.attachment(`📸 Aislar Registro Grilla - Enlace PayIn`, buffer, "image/png");
+        }
 
         // =========================================================
-        // 5. NAVEGAR AFUERA DEL MERCHANT A LA PASARELA EXTERNA
+        // 5. VISITAR EL VOUCHER NATAL DE PAYPAGA (FRONT EXTERNO)
         // =========================================================
-        // El link está en un tag <a> con URL de /pl/ (PayLink)
+        console.log("➡️ Paso 5: Viajando al Checkout Público desde el UI Merchant..");
         const paymentUrlTag = page.locator('a[href*="/pl/"]').first();
         expect(await paymentUrlTag.isVisible()).toBe(true);
 
-        // Como abre en blank, preparamos a Playwright para esperar una pestaña nueva
         const popupPromise = context.waitForEvent('page');
-        await paymentUrlTag.click(); // Disparamos el new Tab
+        await paymentUrlTag.click(); 
         const newTab = await popupPromise;
 
         await newTab.waitForLoadState('domcontentloaded');
-        await newTab.waitForTimeout(3000); // Safari/Gateway Externos como SafetyPay tardan
+        await newTab.waitForTimeout(4000); // Tiempo para el montaje React
 
         if (allure && allure.attachment) {
-            try {
-                const bp = await newTab.screenshot({ fullPage: true });
-                allure.attachment(`📸 Evidencia SafetyPay (Nueva Pestaña)`, bp, "image/png");
-            } catch (e) { }
+            const bp = await newTab.screenshot({ fullPage: true }).catch(()=>null);
+            if (bp) allure.attachment(`📸 Checkout Voucher PayPaga (Public View)`, bp, "image/png");
         }
 
-        // Validación de Importe Visual en SafetyPay
         const gatewayHTML = await newTab.innerText('body').catch(() => "");
-        const wasMatched = gatewayHTML.includes('US$ 100') || gatewayHTML.includes('US$100');
-
-        if (allure && allure.attachment) {
-            allure.attachment(`Auditar E2E Safetypay`, JSON.stringify({
-                TargetHTML_Contains_US100: wasMatched,
-                Link_Haciendo_Destino: await newTab.url(),
-                Expected_Amount: "US$ 100"
-            }, null, 2), "application/json");
-        }
-
-        expect(wasMatched).toBe(true); // ¡Si no aparece el precio en la Pasarela, esto estallará en ROJO!
+        const wasMatched = gatewayHTML.includes('1200.54') && gatewayHTML.includes('ARS');
+        
+        expect(wasMatched).toBe(true); // ¡Si no aparece el precio o la moneda ARS estallara!
+        await newTab.close();
 
         // =========================================================
-        // 6. BUSCAR TRANSACCIÓN EN GRILLA, EXTRAER ID Y APROBAR
+        // 6. ADELANTAR ESTADO VIA V2 ADMIN APP (FAST ADMIN)
         // =========================================================
-        // Volvemos a la pestaña original de Merchant Portal
+        console.log("➡️ Paso 6: Rescatando Transaction ID y despachando hacia Admin Portal V2");
         await page.bringToFront();
-
+        
+        // Transiciones UI
         const btnTransacciones = page.getByRole('link', { name: ' Transacciones ' }).first();
         await btnTransacciones.click({ force: true }).catch(()=>null);
         await page.waitForTimeout(1000);
@@ -169,10 +168,9 @@ describe(`MERCHANT PORTAL EC: Creación de Payment Link en [Amb: ${envConfig.cur
         const btnEntradas = page.getByRole('link', { name: 'Transacciones de Entrada' }).first();
         await btnEntradas.click({ force: true }).catch(()=>null);
 
-        // Esperamos agresivamente a que el sistema agregue la fila a la tabla UI
-        await page.waitForTimeout(4000); 
-
-        // Raspamos el ID buscando en la tabla visible
+        await page.waitForTimeout(4000); // UI Rendering Tabla
+        
+        // UUID Regex Scanner 
         const generatedTxId = await page.evaluate(() => {
             const uuidRegex = /[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/;
             const elements = document.body.innerText.match(uuidRegex);
@@ -180,29 +178,37 @@ describe(`MERCHANT PORTAL EC: Creación de Payment Link en [Amb: ${envConfig.cur
         });
 
         if (!generatedTxId) {
-            console.warn("⚠️ No se encontró UUID en la tabla de Transacciones de Entrada. Puede que la inserción se demore.");
-        } else {
-            console.log(`\n🔗 PayIn Transaction ID Encontrado en Grilla: ${generatedTxId}`);
-            if (allure && allure.attachment) allure.attachment('PayIn ID', generatedTxId, 'text/plain');
-            
-            // Aprobar forzosamente por Admin
-            await fastAdminApprove(page, generatedTxId, 'pay-in', allure);
-        }
+            throw new Error("⚠️ FALLO FATAL: No se encontró un UUID en la tabla de Transacciones de Entrada luego de crear el enlace de pago.");
+        } 
+
+        console.log(`\n🔗 PayIn ARS Transaction ID: ${generatedTxId}`);
+        if (allure && allure.attachment) allure.attachment('PayIn UUID Transaccion', generatedTxId, 'text/plain');
+        
+        // Magia: Nos desviaremos al Admin v2 con nuestro Helper hibridado
+        await fastAdminAction(page, generatedTxId, 'pay-in', allure);
 
         // =========================================================
-        // 7. VOLVER AL DASHBOARD Y VALIDAR IMPACTO DE SALDOS
+        // 7. CALCULO MATEMÁTICO DE SALDOS DE RETORNO Y AUDITORÍA
         // =========================================================
-        const finalBalances = await loginAndCaptureDashboard(page, allure, false);
-        console.log("📈 SALDOS FINALES PAYIN TRAS APROBACIÓN:", finalBalances);
+        console.log("➡️ Paso 7: Matemática Final");
+        const finalBalances = await loginAndCaptureDashboard(page, allure, false, 'AR');
+        console.log(`📈 SALDOS FINALES CAPTURADOS: ${JSON.stringify(finalBalances)}`);
 
-        // De acuerdo al Excel: Initial + Payin = Sube
+        // Aserciones Numéricas. Available + Volume debe incrementar.
         expect(finalBalances.available).toBeGreaterThan(initialBalances.available);
         expect(finalBalances.volume).toBeGreaterThan(initialBalances.volume);
-        expect(finalBalances.fees !== initialBalances.fees).toBeTruthy();
-        expect(finalBalances.taxes !== initialBalances.taxes).toBeTruthy();
+        
+        // Fees y Taxes normalmente transicionan. (Asegurando diferencia por el ingreso)
+        expect(finalBalances.fees).not.toBe(initialBalances.fees);
+        expect(finalBalances.taxes).not.toBe(initialBalances.taxes);
         
         if (allure && allure.attachment) {
-            await allure.attachment(`Comparativa PayIn EC`, JSON.stringify({ SALDOS_INICIALES: initialBalances, SALDOS_FINALES: finalBalances }, null, 2), "application/json");
+            await allure.attachment(`Comparativa PayIn Merchant UI - ARS`, JSON.stringify({ 
+                SALDO_INICIAL: initialBalances, 
+                COMPROBANTE_GENERADO: 1200.54,
+                SALDO_MODIFICADO: finalBalances 
+            }, null, 2), "application/json");
         }
+        console.log("✅ FLUJO OMNICHANNEL ARS (PAYIN MERCHANT) CULMINADO EXITOSAMENTE.");
     });
 });
