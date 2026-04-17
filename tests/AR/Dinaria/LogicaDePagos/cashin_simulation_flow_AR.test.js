@@ -1,17 +1,30 @@
 const axios = require('axios');
 const allure = require('allure-js-commons');
+const { chromium } = require('playwright');
 const { getAccessToken } = require('../../../../utils/authHelper');
 const envConfig = require('../../../../utils/envConfig');
+const { loginAndCaptureDashboard } = require('../../../../utils/uiBalanceHelper');
 
 jest.setTimeout(1800000); 
 
 describe(`[Logica Financiera] Dinaria AR: Cash-In Webhooks Under/Over Pay Simulator [Env: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 
     let token = '';
+    let browser, context, sharedPage;
     const DINARIA_SANDBOX_URL = 'https://api.sandbox.dinaria.com/ars/cashin/simulate';
 
     beforeAll(async () => {
         token = await getAccessToken();
+        try {
+            browser = await chromium.launch({ headless: true });
+            context = await browser.newContext({ locale: 'es-AR', colorScheme: 'dark' });
+            sharedPage = await context.newPage();
+            sharedPage.setDefaultTimeout(15000);
+        } catch(e) {}
+    });
+
+    afterAll(async () => {
+        if(browser) await browser.close();
     });
 
     /**
@@ -47,14 +60,17 @@ describe(`[Logica Financiera] Dinaria AR: Cash-In Webhooks Under/Over Pay Simula
             validateStatus: () => true
         });
 
+        if (allure && allure.attachment) {
+            allure.attachment(`[API] 1. Request POST /pay-in`, JSON.stringify(payload, null, 2), "application/json");
+            allure.attachment(`[API] 2. Response /pay-in (${response.status})`, JSON.stringify(response.data, null, 2), "application/json");
+        }
+
         if (response.status !== 200 && response.status !== 201) {
             throw new Error(`Falló la creación del Pay-In: ${JSON.stringify(response.data)}`);
         }
 
         const txId = response.data.transaction_id || response.data.id || 'No Asignado';
         
-        // Extracción Dinámica del CVU (Normalmente devuelto por Dinaria en la response del PayIn)
-        // Exploramos el árbol del JSON dependiendo de la estructura de H2H
         let assignedCvu = null;
         let pMethods = response.data.payment_methods || [];
         if(pMethods.length > 0 && pMethods[0].fields) {
@@ -88,6 +104,11 @@ describe(`[Logica Financiera] Dinaria AR: Cash-In Webhooks Under/Over Pay Simula
             validateStatus: () => true
         });
 
+        if (allure && allure.attachment) {
+            allure.attachment(`[SANDBOX] 1. Inyección Simulator (${injectAmount})`, JSON.stringify(simPayload, null, 2), "application/json");
+            allure.attachment(`[SANDBOX] 2. Respuesta Dinaria API (${res.status})`, JSON.stringify(res.data || "Empty Response", null, 2), "application/json");
+        }
+
         return { status: res.status, data: res.data, payloadInyectado: simPayload };
     };
 
@@ -116,25 +137,28 @@ describe(`[Logica Financiera] Dinaria AR: Cash-In Webhooks Under/Over Pay Simula
 
     test('1. Exact Match (Pago Exacto): Inyección del 100% de la orden', async () => {
         const ordenAmount = 1500.00;
-        console.log(`[Exact Match] 1. Creando H2H de $${ordenAmount}`);
+        
+        await allure.step("1. Capturar Dashboard Inicial (UI)", async () => {
+            await loginAndCaptureDashboard(sharedPage, allure, true, 'AR');
+        });
+
         const payinInfo = await buildH2HPayin(ordenAmount, true);
+        if(!payinInfo.assignedCvu) return;
         
-        if(!payinInfo.assignedCvu) {
-            console.warn("⚠️ Dinaria no ha retornado un CVU/CBU. El request fallará. Data:", payinInfo.fullResponse);
-            return; // Salvaguarda
-        }
-        
-        console.log(`[Exact Match] 2. CVU Generado: ${payinInfo.assignedCvu}. Inyectando Cash-In Dinaria de $${ordenAmount}`);
         const simRes = await simulateDinariaCashIn(payinInfo.assignedCvu, payinInfo.cuit, ordenAmount);
-        
         expect([200, 201]).toContain(simRes.status);
 
-        console.log(`[Exact Match] 3. Pooling a PayPaga aguardando Webhook y conciliación...`);
         const finalTx = await waitForStatusUpdate(payinInfo.txId);
-        
         const finalStatus = (finalTx.status || "").toLowerCase();
         
-        if (allure && allure.attachment) allure.attachment(`Conciliación Exacta (1500 -> 1500)`, JSON.stringify({ ID: payinInfo.txId, StatusFinal: finalStatus, Info: finalTx }, null, 2), "application/json");
+        if (allure && allure.attachment) {
+            allure.attachment(`Conciliación Final API`, JSON.stringify({ Status: finalStatus, Data: finalTx }, null, 2), "application/json");
+        }
+        
+        await allure.step("4. Evidencia Visual Front (Impacto Económico)", async () => {
+            const fb = await loginAndCaptureDashboard(sharedPage, allure, false, 'AR');
+            if (allure && allure.attachment) allure.attachment(`Saldos Finales Extraídos Front`, JSON.stringify(fb, null, 2), "application/json");
+        });
 
         expect(finalStatus).toMatch(/confirmed|completed/i);
     });
@@ -143,21 +167,24 @@ describe(`[Logica Financiera] Dinaria AR: Cash-In Webhooks Under/Over Pay Simula
         const ordenAmount = 1500.00;
         const depositAmount = 1000.00;
         
-        console.log(`[Under Pay] 1. Creando H2H de $${ordenAmount} con allowOverUnder=true`);
+        await allure.step("1. Capturar Dashboard Inicial (UI)", async () => {
+            await loginAndCaptureDashboard(sharedPage, allure, true, 'AR');
+        });
+
         const payinInfo = await buildH2HPayin(ordenAmount, true); // true es la clave
-        
         if(!payinInfo.assignedCvu) return;
         
-        console.log(`[Under Pay] 2. Inyectando Solo $${depositAmount} al CVU de Dinaria`);
         const simRes = await simulateDinariaCashIn(payinInfo.assignedCvu, payinInfo.cuit, depositAmount);
         expect([200, 201]).toContain(simRes.status);
 
-        console.log(`[Under Pay] 3. Esperando que PayPaga lo acepte de todos modos...`);
         const finalTx = await waitForStatusUpdate(payinInfo.txId);
-        
         const finalStatus = (finalTx.status || "").toLowerCase();
         
-        if (allure && allure.attachment) allure.attachment(`Under Pay (1500 -> 1000)`, JSON.stringify({ ID: payinInfo.txId, StatusFinal: finalStatus, Info: finalTx }, null, 2), "application/json");
+        if (allure && allure.attachment) allure.attachment(`Resultado Under Pay API`, JSON.stringify({ Status: finalStatus, Data: finalTx }, null, 2), "application/json");
+
+        await allure.step("4. Evidencia Visual Front (Menor volumen inyectado)", async () => {
+            await loginAndCaptureDashboard(sharedPage, allure, false, 'AR');
+        });
 
         expect(finalStatus).toMatch(/confirmed|completed/i);
     });
@@ -166,44 +193,50 @@ describe(`[Logica Financiera] Dinaria AR: Cash-In Webhooks Under/Over Pay Simula
         const ordenAmount = 1000.00;
         const depositAmount = 800.00; // Intento de pagar menos
         
-        console.log(`[Strict Reject] 1. Creando H2H estricto de $${ordenAmount} (allowOverUnder=FALSE)`);
+        await allure.step("1. Capturar Dashboard UI (Estado Base)", async () => {
+            await loginAndCaptureDashboard(sharedPage, allure, true, 'AR');
+        });
+
         const payinInfo = await buildH2HPayin(ordenAmount, false); // FALSE
-        
         if(!payinInfo.assignedCvu) return;
         
-        console.log(`[Strict Reject] 2. Disparando $${depositAmount} al Sandbox Dinaria...`);
         const simRes = await simulateDinariaCashIn(payinInfo.assignedCvu, payinInfo.cuit, depositAmount);
-        expect([200, 201]).toContain(simRes.status); // El simulador lo agarra
+        expect([200, 201]).toContain(simRes.status);
 
-        console.log(`[Strict Reject] 3. Vigiliando PayPaga (Debe escupir/ignorar el webhook)...`);
-        const finalTx = await waitForStatusUpdate(payinInfo.txId, 6, 4000); // Darle tiempo para un falso positivo
-        
+        const finalTx = await waitForStatusUpdate(payinInfo.txId, 6, 4000); 
         const finalStatus = (finalTx.status || "").toLowerCase();
         
-        if (allure && allure.attachment) allure.attachment(`Rechazo Estricto (1000 -> 800 Rebote)`, JSON.stringify({ ID: payinInfo.txId, StatusFinal: finalStatus, Info: finalTx }, null, 2), "application/json");
+        if (allure && allure.attachment) allure.attachment(`Estado Rebote API`, JSON.stringify({ Status: finalStatus, Data: finalTx }, null, 2), "application/json");
 
-        // Al rechazar el UnderPay, Dinaria no nos confirma, la Tx se queda colgada PENDING.
+        await allure.step("4. Visualizar Front (El saldo NUNCA debió moverse)", async () => {
+            await loginAndCaptureDashboard(sharedPage, allure, false, 'AR');
+        });
+
         expect(finalStatus).toBe('pending');
     });
 
     test('4. Over Pay (Abono Mayor Permitido): El cliente transfiere de más', async () => {
         const ordenAmount = 1500.00;
-        const depositAmount = 2500.00; // Error del cliente (Abonó mil de más)
+        const depositAmount = 2500.00; 
         
-        console.log(`[Over Pay] 1. Creando H2H de $${ordenAmount} con allowOverUnder=true`);
+        await allure.step("1. Capturar Dashboard UI", async () => {
+            await loginAndCaptureDashboard(sharedPage, allure, true, 'AR');
+        });
+
         const payinInfo = await buildH2HPayin(ordenAmount, true); 
-        
         if(!payinInfo.assignedCvu) return;
         
-        console.log(`[Over Pay] 2. ¡Depositando exagerados $${depositAmount}!`);
         const simRes = await simulateDinariaCashIn(payinInfo.assignedCvu, payinInfo.cuit, depositAmount);
         expect([200, 201]).toContain(simRes.status);
 
-        console.log(`[Over Pay] 3. Esperando que el OverPay sea absorbido...`);
         const finalTx = await waitForStatusUpdate(payinInfo.txId);
-        
         const finalStatus = (finalTx.status || "").toLowerCase();
-        if (allure && allure.attachment) allure.attachment(`Over Pay Tolerado (1500 -> 2500)`, JSON.stringify({ ID: payinInfo.txId, StatusFinal: finalStatus, Info: finalTx }, null, 2), "application/json");
+        
+        if (allure && allure.attachment) allure.attachment(`Over Pay Tolerado API`, JSON.stringify({ Status: finalStatus, Data: finalTx }, null, 2), "application/json");
+
+        await allure.step("4. Evidencia Frontend (Subió más capital del ordenado)", async () => {
+            await loginAndCaptureDashboard(sharedPage, allure, false, 'AR');
+        });
 
         expect(finalStatus).toMatch(/confirmed|completed/i);
     });

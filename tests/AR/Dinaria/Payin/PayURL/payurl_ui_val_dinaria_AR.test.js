@@ -125,9 +125,10 @@ describe(`[PayURL Dinaria AR] Formularios UI Validations Checkout [Ambiente: ${e
             return { hasRedBorder, errorText };
         } else {
             // El click solo va en casos felices
+            await attachEvidenciaUI(`${testName} - ANTES DEL CLICK`);
             await btnSubmit.click({ force: true }).catch(()=>null);
-            await page.waitForTimeout(3000); // Esperamos a que cargue la vista final (Error Server o Voucher)
-            await attachEvidenciaUI(testName);
+            await page.waitForTimeout(4000); // Esperamos a que cargue la vista final (Error Server o Voucher)
+            await attachEvidenciaUI(`${testName} - DESPUÉS (VOUCHER)`);
             const content = await page.innerText('body').catch(()=>"");
             return content;
         }
@@ -138,12 +139,17 @@ describe(`[PayURL Dinaria AR] Formularios UI Validations Checkout [Ambiente: ${e
     // ==========================================
     describe('1. Frontend Validations: First Name', () => {
 
-        test('1.1. First Name: Boundary Corto (1 Charr) Deshabilita Form', async () => {
-            const r = await executeFieldValidation('First Name 1 Letra', 'first_name', '#first_name', 'A');
+        test('1.0. First Name: Vacío o Nulo (TC06, TC07, TC08)', async () => {
+            const r = await executeFieldValidation('First Name Vacio', 'first_name', '#first_name', '');
             expect(r.errorText).toMatch(/Ingresa tu nombre|required/i);
         });
 
-        test('1.2. First Name: Boundary Largo (51 Chars)', async () => {
+        test('1.1. First Name: Boundary Corto (1 Charr) Deshabilita Form (TC11)', async () => {
+            const r = await executeFieldValidation('First Name 1 Letra', 'first_name', '#first_name', 'A');
+            expect(r.errorText).toMatch(/Ingresa tu nombre|required|format/i);
+        });
+
+        test('1.2. First Name: Boundary Largo (51 Chars) (TC12)', async () => {
             const inputVal = 'A'.repeat(51);
             const r = await executeFieldValidation('First Name Largo', 'first_name', '#first_name', inputVal);
             if (r.errorText) {
@@ -169,6 +175,12 @@ describe(`[PayURL Dinaria AR] Formularios UI Validations Checkout [Ambiente: ${e
             expect(r).toMatch(/Referencia de Pago/i);
             expect(r).toMatch(/CVU|CBU/i);
         });
+
+        test('1.6. First Name: Boundary Máximo (50 Chars Exactos) (TC13)', async () => {
+            const r = await executeFieldValidation('First Name 50 Chars', 'first_name', '#first_name', 'A'.repeat(50), true);
+            expect(r).toMatch(/Referencia de Pago/i);
+            expect(r).toMatch(/CVU|CBU/i);
+        });
     });
 
     // ==========================================
@@ -176,12 +188,17 @@ describe(`[PayURL Dinaria AR] Formularios UI Validations Checkout [Ambiente: ${e
     // ==========================================
     describe('2. Frontend Validations: Last Name', () => {
 
-        test('2.1. Last Name: Boundary Corto (1 Charr) Deshabilita Form', async () => {
-            const r = await executeFieldValidation('Last Name 1 Letra', 'last_name', '#last_name', 'B');
+        test('2.0. Last Name: Vacío o Nulo (TC14, TC15, TC16)', async () => {
+            const r = await executeFieldValidation('Last Name Vacio', 'last_name', '#last_name', '');
             expect(r.errorText).toMatch(/Ingresa tu apellido|required/i);
         });
 
-        test('2.2. Last Name: Boundary Largo (51 Chars)', async () => {
+        test('2.1. Last Name: Boundary Corto (1 Charr) Deshabilita Form (TC19)', async () => {
+            const r = await executeFieldValidation('Last Name 1 Letra', 'last_name', '#last_name', 'B');
+            expect(r.errorText).toMatch(/Ingresa tu apellido|required|format/i);
+        });
+
+        test('2.2. Last Name: Boundary Largo (51 Chars) (TC20)', async () => {
             const inputVal = 'B'.repeat(51);
             const r = await executeFieldValidation('Last Name Largo', 'last_name', '#last_name', inputVal);
             if (r.errorText) {
@@ -203,6 +220,12 @@ describe(`[PayURL Dinaria AR] Formularios UI Validations Checkout [Ambiente: ${e
 
         test('2.5. Last Name: Happy Path con Caracteres Complejos (Latino/Apostrofes)', async () => {
             const r = await executeFieldValidation('Last Name Complejo Exitoso', 'last_name', '#last_name', "De La Santísima Trinidad Peñas", true);
+            expect(r).toMatch(/Referencia de Pago/i);
+            expect(r).toMatch(/CVU|CBU/i);
+        });
+
+        test('2.6. Last Name: Boundary Máximo (50 Chars Exactos) (TC21)', async () => {
+            const r = await executeFieldValidation('Last Name 50 Chars', 'last_name', '#last_name', 'B'.repeat(50), true);
             expect(r).toMatch(/Referencia de Pago/i);
             expect(r).toMatch(/CVU|CBU/i);
         });

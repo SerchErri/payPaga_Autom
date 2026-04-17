@@ -160,7 +160,7 @@ describe(`[Hybrid E2E] Create Payment Link (PayUrl) Dinaria (AR) [Env: ${envConf
         const finalBalances = await loginAndCaptureDashboard(page, allure, false, 'AR');
         console.log("📈 FINAL PAYURL BALANCES AFTER APPROVAL:", finalBalances);
 
-        expect(finalBalances.available).toBeGreaterThan(initialBalances.available);
+        expect(finalBalances.general).toBeGreaterThan(initialBalances.general);
         expect(finalBalances.volume).toBeGreaterThan(initialBalances.volume);
         expect(finalBalances.fees !== initialBalances.fees).toBeTruthy();
         expect(finalBalances.taxes !== initialBalances.taxes).toBeTruthy();
@@ -176,10 +176,10 @@ describe(`[Hybrid E2E] Create Payment Link (PayUrl) Dinaria (AR) [Env: ${envConf
 ==================================================================
 Concept              | Details                     | Oper | Value
 ------------------------------------------------------------------
-Initial Test Balance | Opening Balance             | ARS  | ${initialBalances.available.toFixed(2)}
-PayUrl Amount        | ${opDiff.toFixed(0)} In (-) ${feeDiff.toFixed(2)} F (-) ${taxDiff.toFixed(2)} T |  -   | ${netValue.toFixed(2)}
+Initial General Bal  | Opening Balance (General)   | ARS  | ${initialBalances.general.toFixed(2)}
+PayUrl Amount        | ${opDiff.toFixed(2)} In (-) ${feeDiff.toFixed(2)} F (-) ${taxDiff.toFixed(2)} T |  -   | ${netValue.toFixed(2)}
 ------------------------------------------------------------------
-Current Test Balance | Total current balance in UI | ARS  | ${finalBalances.available.toFixed(2)}
+Current General Bal  | Total current balance in UI | ARS  | ${finalBalances.general.toFixed(2)}
 ==================================================================
 Concept              | Details                     | Oper | Total
 ------------------------------------------------------------------

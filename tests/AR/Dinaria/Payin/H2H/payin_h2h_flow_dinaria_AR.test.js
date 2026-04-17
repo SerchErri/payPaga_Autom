@@ -155,7 +155,7 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
         console.log("📈 SALDOS FINALES PAYIN TRAS APROBACIÓN H2H:", finalBalances);
 
         // Validaciones Tolerantes al Paralelismo
-        expect(finalBalances.available).toBeGreaterThan(initialBalances.available);
+        expect(finalBalances.general).toBeGreaterThan(initialBalances.general);
         expect(finalBalances.volume).toBeGreaterThan(initialBalances.volume);
         expect(finalBalances.fees !== initialBalances.fees).toBeTruthy();
         expect(finalBalances.taxes !== initialBalances.taxes).toBeTruthy();
@@ -171,10 +171,10 @@ describe(`[E2E Híbrido] Pay-In H2H Dinaria (AR): API Generación + UI Validacio
 ==================================================================
 Concept              | Details                     | Oper | Value
 ------------------------------------------------------------------
-Initial Test Balance | Opening Balance             | ARS  | ${initialBalances.available.toFixed(2)}
-H2H PayIn Amount     | ${opDiff.toFixed(0)} In (-) ${feeDiff.toFixed(2)} F (-) ${taxDiff.toFixed(2)} T |  -   | ${netValue.toFixed(2)}
+Initial General Bal  | Opening Balance (General)   | ARS  | ${initialBalances.general.toFixed(2)}
+H2H PayIn Amount     | ${opDiff.toFixed(2)} In (-) ${feeDiff.toFixed(2)} F (-) ${taxDiff.toFixed(2)} T |  -   | ${netValue.toFixed(2)}
 ------------------------------------------------------------------
-Current Test Balance | Total current balance in UI | ARS  | ${finalBalances.available.toFixed(2)}
+Current General Bal  | Total current balance in UI | ARS  | ${finalBalances.general.toFixed(2)}
 ==================================================================
 Concept              | Details                     | Oper | Total
 ------------------------------------------------------------------

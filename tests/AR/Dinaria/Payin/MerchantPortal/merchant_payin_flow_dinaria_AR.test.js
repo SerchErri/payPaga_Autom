@@ -206,10 +206,10 @@ describe(`MERCHANT PORTAL AR: Payin Manual Flow (Dinaria) [Amb: ${envConfig.curr
 ==================================================================
 Concept              | Details                     | Oper | Value
 ------------------------------------------------------------------
-Initial Test Balance | Opening Balance             | ARS  | ${initialBalances.available.toFixed(2)}
+Initial General Bal  | Opening Balance (General)   | ARS  | ${initialBalances.general.toFixed(2)}
 Merchant PayIn Amount| ${opDiff.toFixed(2)} In (-) ${feeDiff.toFixed(2)} F (-) ${taxDiff.toFixed(2)} T |  -   | ${netValue.toFixed(2)}
 ------------------------------------------------------------------
-Current Test Balance | Total current balance in UI | ARS  | ${finalBalances.available.toFixed(2)}
+Current General Bal  | Total current balance in UI | ARS  | ${finalBalances.general.toFixed(2)}
 ==================================================================
 Concept              | Details                     | Oper | Total
 ------------------------------------------------------------------
@@ -219,8 +219,8 @@ Taxes                | ${Math.abs(initialBalances.taxes).toFixed(2).padEnd(8)} |
 `;
         console.log(mathAuditText);
 
-        // Aserciones Numéricas. Available + Volume debe incrementar.
-        expect(finalBalances.available).toBeGreaterThan(initialBalances.available);
+        // Aserciones Numéricas. General + Volume debe incrementar.
+        expect(finalBalances.general).toBeGreaterThan(initialBalances.general);
         expect(finalBalances.volume).toBeGreaterThan(initialBalances.volume);
         
         // Fees y Taxes normalmente transicionan. (Asegurando diferencia por el ingreso)

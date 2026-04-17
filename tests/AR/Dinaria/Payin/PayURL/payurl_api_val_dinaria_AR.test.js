@@ -123,7 +123,7 @@ describe(`[PayURL Dinaria AR] Validación Backend Estricta y UI [Ambiente: ${env
     // ==========================================
     describe('2. Root y Consistency (Amount Test Combinados)', () => {
 
-        test('2.1. Amount: Límite Mínimo (Valor 0) - Validación UI', async () => {
+        test('2.1. Amount: Límite Mínimo (Valor 0) - Validación UI (TC01)', async () => {
             const p = generateBasePayload(); p.amount = 0;
             const res = await executePayUrlPost('Amount 0', p);
             expect([200, 201]).toContain(res.status);
@@ -139,6 +139,33 @@ describe(`[PayURL Dinaria AR] Validación Backend Estricta y UI [Ambiente: ${env
                 const uiSnap = await page.screenshot({ fullPage: true }).catch(() => null);
                 if (uiSnap) await allure.attachment(`📸 Evidencia Errores UI: Amount 0`, uiSnap, "image/png");
             }
+        });
+
+        test('2.1.1. TC02 Amount: Negative Amount Absolute Value Logic', async () => {
+            const p = generateBasePayload(); p.amount = -1500.00;
+            const res = await executePayUrlPost('Negative Amount', p);
+            const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
+            const content = await visitCheckoutAndForceValidation('Negative Amount', checkoutUrl);
+            const fueFrenado = /mayor que|greater than|invalid|incorrect/i.test(content) || (!content.includes('1500.00') && !content.includes('Referencia de Pago'));
+            expect(fueFrenado).toBe(true);
+        });
+
+        test('2.1.2. TC04 Amount: Null Amount Validation', async () => {
+            const p = generateBasePayload(); p.amount = null;
+            const res = await executePayUrlPost('Null Amount', p);
+            const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
+            const content = await visitCheckoutAndForceValidation('Null Amount', checkoutUrl);
+            const fueFrenado = /monto|amount|requerido|required|invalid/i.test(content);
+            expect(fueFrenado).toBe(true);
+        });
+
+        test('2.1.3. TC05 Currency: Unsupported Currency Validation', async () => {
+            const p = generateBasePayload(); p.currency = "USD";
+            const res = await executePayUrlPost('Unsupported Currency', p);
+            const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
+            const content = await visitCheckoutAndForceValidation('Unsupported Currency', checkoutUrl);
+            const fueFrenado = /currency|moneda|soport|support|invalid|required/i.test(content);
+            expect(fueFrenado).toBe(true);
         });
 
         test('2.2. Amount: Validar importe puntual de 1.00 (Voucher Generado Ok)', async () => {
@@ -253,9 +280,26 @@ describe(`[PayURL Dinaria AR] Validación Backend Estricta y UI [Ambiente: ${env
             const content = await runFirstNameTest('First Name HTML Injection', "<script>alert(1)</script> Sergio");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.5. First Name: Límite Estricto (51 Chars)', async () => {
+        test('3.5. First Name: Límite Estricto (51 Chars) (TC12)', async () => {
             const content = await runFirstNameTest('First Name Límite 51', "A".repeat(51));
             expect(content).toContain('length must be at most 50 characters');
+        });
+        test('3.5.1. First Name: Whitespace Only (TC08)', async () => {
+            const content = await runFirstNameTest('First Name Solo Espacios', "     ");
+            expect(content).toContain('input does not match the required format');
+        });
+        test('3.5.2. First Name: Special Characters (TC10)', async () => {
+            const content = await runFirstNameTest('First Name Especiales', "Jon@Snow#");
+            expect(content).toContain('input does not match the required format');
+        });
+        test('3.5.3. First Name: Single Character (TC11)', async () => {
+            const content = await runFirstNameTest('First Name 1 Letra', "A");
+            const esErrorString = /least 2|al menos 2|format|formato|requerid|invalid/i.test(content);
+            expect(esErrorString).toBe(true);
+        });
+        test('3.5.4. First Name: Exact 50 Characters (TC13)', async () => {
+            const content = await runFirstNameTest('First Name 50 Chars Feliz', "A".repeat(50));
+            expect(content).toMatch(/Referencia de Pago/i);
         });
 
         // --- LAST NAME ---
@@ -275,9 +319,26 @@ describe(`[PayURL Dinaria AR] Validación Backend Estricta y UI [Ambiente: ${env
             const content = await runLastNameTest('Last Name HTML Injection', "<script>alert(2)</script> Gomez");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.10. Last Name: Boundary 51 Chars', async () => {
+        test('3.10. Last Name: Boundary 51 Chars (TC20)', async () => {
             const content = await runLastNameTest('Last Name Límite 51', "A".repeat(51));
             expect(content).toContain('length must be at most 50 characters');
+        });
+        test('3.10.1. Last Name: Whitespace Only (TC16)', async () => {
+            const content = await runLastNameTest('Last Name Solo Espacios', "     ");
+            expect(content).toContain('input does not match the required format');
+        });
+        test('3.10.2. Last Name: Special Characters (TC18)', async () => {
+            const content = await runLastNameTest('Last Name Especiales', "Gomez%_!");
+            expect(content).toContain('input does not match the required format');
+        });
+        test('3.10.3. Last Name: Single Character (TC19)', async () => {
+            const content = await runLastNameTest('Last Name 1 Letra', "G");
+            const esErrorString = /least 2|al menos 2|format|formato|requerid|invalid/i.test(content);
+            expect(esErrorString).toBe(true);
+        });
+        test('3.10.4. Last Name: Exact 50 Characters (TC21)', async () => {
+            const content = await runLastNameTest('Last Name 50 Chars Feliz', "B".repeat(50));
+            expect(content).toMatch(/Referencia de Pago/i);
         });
 
         // --- DOCUMENT (CUIL AR) ---
@@ -290,13 +351,19 @@ describe(`[PayURL Dinaria AR] Validación Backend Estricta y UI [Ambiente: ${env
             expect(content).toContain('input does not match the required format');
         });
         
-        test('3.13. CUIL Válido sin guiones (Voucher Exitoso)', async () => {
+        test('3.13. CUIL Válido sin guiones (Voucher Exitoso) (TC25)', async () => {
             const content = await runDocTest('CUIL sin guiones Válido', "20084908488");
             expect(content).toMatch(/Referencia de Pago/i);
             expect(content).toMatch(/CVU|CBU/i);
         });
 
-        test('3.14. CUIL Inválido: Caracteres Especiales', async () => {
+        test('3.13.1. CUIL Válido CON guiones (Voucher Exitoso) (TC24)', async () => {
+            const content = await runDocTest('CUIL con guiones', "20-08490848-8");
+            expect(content).toMatch(/Referencia de Pago/i);
+            expect(content).toMatch(/CVU|CBU/i);
+        });
+
+        test('3.14. CUIL Inválido: Caracteres Especiales (TC26)', async () => {
             const content = await runDocTest('CUIL Especiales', "20-08490848-$");
             expect(content).toContain('input does not match the required format');
         });
@@ -304,9 +371,30 @@ describe(`[PayURL Dinaria AR] Validación Backend Estricta y UI [Ambiente: ${env
             const content = await runDocTest('CUIL Digito Roto', "20-08490848-9");
             expect(content).toContain('invalid cuil/cuit');
         });
-        test('3.16. CUIL Inválido: Puntos', async () => {
+        test('3.16. CUIL Inválido: Puntos (TC28)', async () => {
             const content = await runDocTest('CUIL Puntos', "20.08490848.8");
             expect(content).toContain('input does not match the required format');
+        });
+
+        // --- PAYMENT METHODS ---
+        test('3.17. Payment Method: Empty (TC29)', async () => {
+            const p = generateBasePayload();
+            p.predefined_fields[0].payment_method = ""; // Empty payment method identifier
+            const res = await executePayUrlPost('Empty Pay Method', p);
+            const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
+            const content = await visitCheckoutAndForceValidation('Empty Pay Method', checkoutUrl);
+            const esErrorString = /method|método|requerido|required|invalid|soporta/i.test(content);
+            expect(esErrorString).toBe(true);
+        });
+        test('3.18. Payment Method: Incorrect (TC30)', async () => {
+            const p = generateBasePayload();
+            p.predefined_fields[0].payment_method = "crypto_bitcoin"; // Not valid for Argentina
+            p.allowed_payment_methods = ["crypto_bitcoin"];
+            const res = await executePayUrlPost('Incorrect Pay Method', p);
+            const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
+            const content = await visitCheckoutAndForceValidation('Incorrect Pay Method', checkoutUrl);
+            const esErrorString = /method|método|requerido|required|invalid|soporta/i.test(content);
+            expect(esErrorString).toBe(true);
         });
     });
 });
