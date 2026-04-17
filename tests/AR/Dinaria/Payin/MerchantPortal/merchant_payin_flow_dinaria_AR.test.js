@@ -194,6 +194,31 @@ describe(`MERCHANT PORTAL AR: Payin Manual Flow (Dinaria) [Amb: ${envConfig.curr
         const finalBalances = await loginAndCaptureDashboard(page, allure, false, 'AR');
         console.log(`📈 SALDOS FINALES CAPTURADOS: ${JSON.stringify(finalBalances)}`);
 
+        // Calculo de diferencias
+        const opDiff = Math.abs(finalBalances.volume - initialBalances.volume);
+        const feeDiff = Math.abs(finalBalances.fees - initialBalances.fees);
+        const taxDiff = Math.abs(finalBalances.taxes - initialBalances.taxes);
+        const netValue = opDiff - feeDiff - taxDiff;
+
+        const mathAuditText = `
+==================================================================
+🧮 MERCHANT PAYIN IMPACT CALCULATION (AR)
+==================================================================
+Concept              | Details                     | Oper | Value
+------------------------------------------------------------------
+Initial Test Balance | Opening Balance             | ARS  | ${initialBalances.available.toFixed(2)}
+Merchant PayIn Amount| ${opDiff.toFixed(2)} In (-) ${feeDiff.toFixed(2)} F (-) ${taxDiff.toFixed(2)} T |  -   | ${netValue.toFixed(2)}
+------------------------------------------------------------------
+Current Test Balance | Total current balance in UI | ARS  | ${finalBalances.available.toFixed(2)}
+==================================================================
+Concept              | Details                     | Oper | Total
+------------------------------------------------------------------
+Fees                 | ${Math.abs(initialBalances.fees).toFixed(2).padEnd(8)} | (+) ${feeDiff.toFixed(2).padEnd(6)} | ARS  | ${Math.abs(finalBalances.fees).toFixed(2)}
+Taxes                | ${Math.abs(initialBalances.taxes).toFixed(2).padEnd(8)} | (+) ${taxDiff.toFixed(2).padEnd(6)} | ARS  | ${Math.abs(finalBalances.taxes).toFixed(2)}
+==================================================================
+`;
+        console.log(mathAuditText);
+
         // Aserciones Numéricas. Available + Volume debe incrementar.
         expect(finalBalances.available).toBeGreaterThan(initialBalances.available);
         expect(finalBalances.volume).toBeGreaterThan(initialBalances.volume);
@@ -203,9 +228,10 @@ describe(`MERCHANT PORTAL AR: Payin Manual Flow (Dinaria) [Amb: ${envConfig.curr
         expect(finalBalances.taxes).not.toBe(initialBalances.taxes);
         
         if (allure && allure.attachment) {
+            allure.attachment('🧮 Auditoría Matemática UI ARS', mathAuditText, 'text/plain');
             await allure.attachment(`Comparativa PayIn Merchant UI - ARS`, JSON.stringify({ 
                 SALDO_INICIAL: initialBalances, 
-                COMPROBANTE_GENERADO: 1200.54,
+                COMPROBANTE_GENERADO: transactionAmount,
                 SALDO_MODIFICADO: finalBalances 
             }, null, 2), "application/json");
         }

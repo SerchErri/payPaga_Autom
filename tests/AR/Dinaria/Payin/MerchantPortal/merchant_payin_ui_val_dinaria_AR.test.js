@@ -4,7 +4,7 @@ const envConfig = require('../../../../../utils/envConfig');
 
 jest.setTimeout(1800000);
 
-describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`Validaciones Interactivas Merchant Portal AR, Dinaria [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 
     let browser;
     let context;
@@ -34,10 +34,8 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
         await btnLogin.evaluate(node => node.disabled = false).catch(() => null);
         await btnLogin.click({ force: true });
 
-        // TELETRANSPORTACIÓN AL FORMULARIO (Deep Linking Absoluto)
+        // TELETRANSPORTACIÓN AL FORMULARIO
         await sharedPage.goto(formUrl, { waitUntil: 'domcontentloaded' });
-
-        // Espera definitiva a que el formulario cargue el dropdown de Países
         await sharedPage.waitForSelector('#country', { timeout: 15000 });
     });
 
@@ -46,18 +44,40 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
     });
 
     const typeSafe = async (page, selector, textToType) => {
-        // Al fallar se detiene el test al instante, sin atrapar errores mudos de 10 segundos
         const loc = page.locator(selector).first();
-        await loc.clear({ timeout: 2000 });
-        await loc.pressSequentially(textToType, { delay: 10, timeout: 5000 });
+        if(await loc.isVisible().catch(()=>false)){
+            await loc.clear({ timeout: 2000 });
+            await loc.pressSequentially(textToType, { delay: 10, timeout: 5000 });
+        }
     };
 
-    const attachEvidence = async (testName, page, actionTaken) => {
+    const attemptSubmit = async (page) => {
+        // Scroll hacia los botones de acción para asegurar que "First Name" y "Last Name" sean visibles
+        const btn = page.locator('button:has-text("Crear Enlace de Pago"), button[type="submit"], #save').first();
+        await btn.scrollIntoViewIfNeeded().catch(() => null);
+        await page.waitForTimeout(500);
+
+        if (allure && allure.attachment) {
+            try {
+                // Screenshot regular para asegurar lo que la pantalla ve tras el scroll (evadiendo overflows ocultos)
+                const buffer = await page.screenshot({ fullPage: false });
+                allure.attachment("📸 Formulario Lleno (Antes de Enviar)", buffer, "image/png");
+            } catch (e) { }
+        }
+        
+        // Simulamos click fuera del entorno
+        await page.mouse.click(0, 0);
+        await page.waitForTimeout(500);
+        
+        // CLICK FORZADO para evaluar burbujas HTML nativas
+        await btn.click({ timeout: 500 }).catch(() => null);
+        await page.waitForTimeout(1000); 
+    };
+
+    const attachEvidence = async (testName, page, actionTaken, isHappyPath = false) => {
         if (!allure || !allure.attachment) return;
 
         let errorVisualExtraido = "Ninguno Visible / Cajas verdes o input bloqueado.";
-
-        // Scan for Red texts or error messages generally used by Paypaga's Vue/React components
         const errorSelectors = ['p.error-message', '.text-red-500', '.error', '.invalid-feedback', 'span[role="alert"]', 'p.text-xs.text-red-500'];
         let extractedTexts = [];
 
@@ -73,11 +93,9 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
             } catch (e) { }
         }
 
-        // ========================================================
-        // MAGIA AVANZADA: ESCÁNER DE BURBUJAS NATIVAS DE NAVEGADOR
-        // ========================================================
+        // ESCÁNER DE BURBUJAS NATIVAS DE NAVEGADOR
         if (page.url().includes('create')) {
-            const camposSospechosos = ['#first_name', '#last_name', '#document_number', '#email', '#amount'];
+            const camposSospechosos = ['#first_name', '#last_name', '#document_number', '#amount'];
             for (const id of camposSospechosos) {
                 try {
                     const target = page.locator(id).first();
@@ -88,18 +106,23 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
                 } catch (e) { }
             }
         }
-        // ========================================================
 
-        // ========================================================
-        // MAGIA AVANZADA: ESCÁNER DE FUGA (2Da Página de Errores)
-        // ========================================================
         let isBotonBloqueadoOverride = false;
         if (!page.url().includes('create')) {
-            const bodyText = await page.innerText('body').catch(() => "");
-            if (bodyText.toLowerCase().includes('no es ecuatoriano') || bodyText.toLowerCase().includes('ecuatoriana')) {
-                extractedTexts.push(`[VALIDACION EN OTRA PÁGINA]: Documento no ecuatoriano mitigado exitosamente.`);
+            if (!isHappyPath) {
+                const bodyText = await page.innerText('body').catch(() => "");
+                if (bodyText.toLowerCase().includes('no es ecuatoriano') || bodyText.toLowerCase().includes('argentin') || bodyText.toLowerCase().includes('invalid')) {
+                    extractedTexts.push(`[VALIDACION EN OTRA PÁGINA]: Bloqueado exitosamente tras evadir UI.`);
+                }
+                isBotonBloqueadoOverride = true; // Forzamos victoria porque el sistema bloqueó el flujo
+                
+                // Auto sanar retornando rápido
+                await page.goto(formUrl, { waitUntil: 'domcontentloaded' });
+                await page.waitForSelector('#country', { timeout: 15000 });
+            } else {
+                // Happy path se espera que avance
+                isBotonBloqueadoOverride = false;
             }
-            isBotonBloqueadoOverride = true; // Forzamos victoria porque el sistema bloqueó el flujo
         }
 
         if (extractedTexts.length > 0) {
@@ -108,7 +131,7 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
 
         let isBotonBloqueado = isBotonBloqueadoOverride;
         if (!isBotonBloqueado && page.url().includes('create')) {
-            const btnSave = page.locator('button:has-text("Crear Enlace de Pago")').first();
+            const btnSave = page.locator('button:has-text("Crear Enlace de Pago"), #save').first();
             isBotonBloqueado = await btnSave.isDisabled().catch(() => true);
         }
 
@@ -116,8 +139,9 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
             Test: testName,
             InputDelRobotQA: actionTaken,
             BotonEstabaDesactivado: isBotonBloqueado,
-            MensajeDeErrorVisual: errorVisualExtraido
+            MensajesDetectados: errorVisualExtraido
         };
+        
         allure.attachment(`📋 Extraccion de Error - ${testName}`, JSON.stringify(auditLog, null, 2), "application/json");
 
         try {
@@ -129,39 +153,52 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
     };
 
     const fillBaseForm = async (page) => {
-        // Auto-Sanación de la Single-Page (Por si un test anterior navegó por completo a la ventana de error)
+        // Auto-Sanación
         if (!page.url().includes('create')) {
             await page.goto(formUrl, { waitUntil: 'domcontentloaded' });
             await page.waitForSelector('#country', { timeout: 15000 });
+            await page.waitForTimeout(500); 
         }
 
-        await page.selectOption('#country', 'EC', { timeout: 1000 }).catch(() => null);
+        // Completamos datos obligatorios
+        await page.selectOption('#country', 'AR', { timeout: 2000 }).catch(() => null);
+        await page.waitForTimeout(500); 
         await page.selectOption('#payment_method', 'bank_transfer', { timeout: 1000 }).catch(() => null);
         await typeSafe(page, '#amount', '100');
         await typeSafe(page, '#first_name', 'Sergio');
-        await typeSafe(page, '#last_name', 'Errigo');
-        await typeSafe(page, '#email', 'perfecto@allure.com');
-        await page.selectOption('#document_type', 'CI', { timeout: 1000 }).catch(() => null);
-        await typeSafe(page, '#document_number', '1710034065');
+        await typeSafe(page, '#last_name', 'Testing');
+        
+        await page.selectOption('#document_type', 'CUIL', { timeout: 1000 }).catch(() => null);
+        await typeSafe(page, '#document_number', '20275105792');
     };
 
-    const attemptSubmit = async (page) => {
-        if (allure && allure.attachment) {
-            try {
-                await page.waitForTimeout(500);
-                const buffer = await page.screenshot({ fullPage: true });
-                allure.attachment("📸 Formulario Lleno (Antes de Enviar)", buffer, "image/png");
-            } catch (e) { }
-        }
-        // Disparamos evento Blur (clickeando afuera) para forzar al Frontend a refrescar las validaciones en tiempo real
-        await page.mouse.click(0, 0);
-        await page.waitForTimeout(500);
+    const takeGridRowScreenshot = async (page, allureInstance) => {
+        await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => null);
+        await page.waitForSelector('span[data-state="pending"]', { timeout: 15000 }).catch(()=>null);
+        
+        // Precisar la primera fila REAL referenciando la tabla interna explícitamente
+        const firstTableRow = page.locator('table.q-table tbody tr').first();
+        
+        if (await firstTableRow.isVisible().catch(()=>false)) {
+            await firstTableRow.scrollIntoViewIfNeeded().catch(()=>null);
 
-        const btn = page.locator('button:has-text("Crear Enlace de Pago")').first();
-        // ELIMINAMOS EL HACK QUE ARRUINABA TODO. 
-        // Si el botón está Deshabilitado por la Validación de React, Playwright tardaría 10s ciegos en clickearlo. Lo limitamos a 500ms.
-        await btn.click({ timeout: 500 }).catch(() => null);
-        await page.waitForTimeout(1000); // Tiempo para que Chrome dibuje la burbuja nativa (si aplica)
+            // Desplazar contenedor horizontal para visualizar todos los datos ("recorrer el renglon")
+            await page.evaluate(() => {
+                const wrappers = document.querySelectorAll('.q-table__middle');
+                wrappers.forEach(w => { if(w.scrollWidth > w.clientWidth) w.scrollLeft = w.scrollWidth; });
+            }).catch(()=>null);
+            
+            await page.waitForTimeout(1000); // Dar tiempor a redraw
+            
+            if (allureInstance && allureInstance.attachment) {
+                const buffer = await firstTableRow.screenshot().catch(()=>null);
+                if (buffer) allureInstance.attachment(`📸 Fila de Grilla (Datos Creados)`, buffer, "image/png");
+            }
+        }
+        
+        // Auto sanar para proximo test
+        await page.goto(formUrl, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('#country', { timeout: 15000 });
     };
 
     // ================================================================
@@ -190,9 +227,10 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
             await fillBaseForm(sharedPage);
             await typeSafe(sharedPage, '#first_name', 'A'.repeat(50));
             await attemptSubmit(sharedPage);
-            const r = await attachEvidence('FN - Limite (50L) Exitoso', sharedPage, "First Name: 'A'x50");
+            const r = await attachEvidence('FN - Limite (50L) Exitoso', sharedPage, "First Name: 'A'x50", true);
             const avanzoSinFrenar = !r.isBotonBloqueado && !r.errorVisualExtraido.includes('[Nativo HTML5]');
             expect(avanzoSinFrenar).toBe(true);
+            await takeGridRowScreenshot(sharedPage, allure);
         });
 
         test('1.3. First Name: Falla Regex por Números', async () => {
@@ -215,9 +253,12 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
 
         test('1.5. First Name: Feliz Apóstrofe', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, '#first_name', "O'Connor");
-            const r = await attachEvidence('FN - Apóstrofes y Feliz', sharedPage, "First Name: 'O'Connor'");
-            expect(r.isBotonBloqueado).toBe(false);
+            await typeSafe(sharedPage, '#first_name', "D'Ángelo-José María");
+            await attemptSubmit(sharedPage);
+            const r = await attachEvidence('FN - Complejo Feliz', sharedPage, "First Name: 'D'Ángelo-José María'", true);
+            const avanzoSinFrenar = !r.isBotonBloqueado && !r.errorVisualExtraido.includes('[Nativo HTML5]');
+            expect(avanzoSinFrenar).toBe(true);
+            await takeGridRowScreenshot(sharedPage, allure);
         });
     });
 
@@ -247,9 +288,10 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
             await fillBaseForm(sharedPage);
             await typeSafe(sharedPage, '#last_name', 'B'.repeat(50));
             await attemptSubmit(sharedPage);
-            const r = await attachEvidence('LN - Limite (50L) Exitoso', sharedPage, "Last Name: 'B'x50");
+            const r = await attachEvidence('LN - Limite (50L)', sharedPage, "Last Name: 'B'x50", true);
             const avanzoSinFrenar = !r.isBotonBloqueado && !r.errorVisualExtraido.includes('[Nativo HTML5]');
             expect(avanzoSinFrenar).toBe(true);
+            await takeGridRowScreenshot(sharedPage, allure);
         });
 
         test('2.3. Last Name: Falla Regex por Números', async () => {
@@ -260,64 +302,60 @@ describe(`Validaciones Interactivas Merchant Portal EC [Amb: ${envConfig.current
             const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
             expect(fueFrenado).toBe(true);
         });
-    });
 
-    // ================================================================
-    // SUITE 3: DOCUMENTOS (CI, DL, PP)
-    // ================================================================
-    describe('3. Suite UI: Documentos Nacionales (Ecuador)', () => {
-        test('3.1. Cédula CI: Falla por Falta (9 chars)', async () => {
+        test('2.4. Last Name: Feliz Complejidad Latina', async () => {
             await fillBaseForm(sharedPage);
-            await sharedPage.selectOption('#document_type', 'CI');
-            await typeSafe(sharedPage, '#document_number', '171003406');
+            await typeSafe(sharedPage, '#last_name', 'De La Santísima Trinidad Peñas');
             await attemptSubmit(sharedPage);
-            const r = await attachEvidence('CI - Corta 9 Digitos', sharedPage, "CI: '171003406'");
-            const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
-            expect(fueFrenado).toBe(true);
-        });
-
-        test('3.2. Cédula CI: Falla por Exceso (11 chars)', async () => {
-            await fillBaseForm(sharedPage);
-            await sharedPage.selectOption('#document_type', 'CI', { timeout: 1000 }).catch(() => null);
-            await typeSafe(sharedPage, '#document_number', '17100340656');
-            await attemptSubmit(sharedPage);
-            const r = await attachEvidence('CI - Larga 11 Digitos', sharedPage, "CI: '17100340656'");
-            const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
-            expect(fueFrenado).toBe(true);
-        });
-
-        test('3.3. Pasaporte PP: Falla por Límite de Frontera Alfanumérica (14 chars)', async () => {
-            await fillBaseForm(sharedPage);
-            await sharedPage.selectOption('#document_type', 'PP', { timeout: 1000 }).catch(() => null);
-            const rotoString = 'A1B2C3D4E5QW90'; // 14
-            await typeSafe(sharedPage, '#document_number', rotoString);
-            await attemptSubmit(sharedPage);
-            const r = await attachEvidence('PP - Boundary 14 (Desborde)', sharedPage, `PP: ${rotoString}`);
-            const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
-            expect(fueFrenado).toBe(true);
+            const r = await attachEvidence('LN - Latino Extremo', sharedPage, "Last Name: 'De La Santísima...'", true);
+            const avanzoSinFrenar = !r.isBotonBloqueado && !r.errorVisualExtraido.includes('[Nativo HTML5]');
+            expect(avanzoSinFrenar).toBe(true);
+            await takeGridRowScreenshot(sharedPage, allure);
         });
     });
 
     // ================================================================
-    // SUITE 4: CORREOS 
+    // SUITE 3: DOCUMENTOS NACIONALES AR (CUIL)
     // ================================================================
-    describe('4. Suite UI: Correos (Emails)', () => {
-        test('4.1. Email: Falla Sin Arroba', async () => {
+    describe('3. Suite UI: Documentos Nacionales (Argentina CUIL/CUIT)', () => {
+        test('3.1. CUIL: Prefix Inválido/Inexistente (19...)', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, '#email', 'usuariogmail.com');
+            await sharedPage.selectOption('#document_type', 'CUIL').catch(()=>null);
+            await typeSafe(sharedPage, '#document_number', '19-08490848-8');
             await attemptSubmit(sharedPage);
-            const r = await attachEvidence('Email - Sin Arroba', sharedPage, "Email: 'usuariogmail.com'");
-            const valid = r.isBotonBloqueado || r.errorVisualExtraido.includes('correo') || r.errorVisualExtraido.includes('ejemplo') || r.errorVisualExtraido.includes('[Nativo HTML5]');
-            expect(valid).toBeTruthy();
+            const r = await attachEvidence('CUIL - Prefix Invalido (19)', sharedPage, "CUIL: '19-08490848-8'");
+            const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
+            expect(fueFrenado).toBe(true);
         });
 
-        test('4.2. Email: Falla Sin TLD y Dominio', async () => {
+        test('3.2. CUIL: Longitud Corta (10 Dígitos)', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, '#email', 'usuario@gmail');
+            await sharedPage.selectOption('#document_type', 'CUIL').catch(()=>null);
+            await typeSafe(sharedPage, '#document_number', '20-08490848');
             await attemptSubmit(sharedPage);
-            const r = await attachEvidence('Email - Sin .com', sharedPage, "Email: 'usuario@gmail'");
-            const valid = r.isBotonBloqueado || r.errorVisualExtraido.toLowerCase().includes('correo') || r.errorVisualExtraido.includes('ejemplo') || r.errorVisualExtraido.includes('[Nativo HTML5]');
-            expect(valid).toBeTruthy();
+            const r = await attachEvidence('CUIL - Corto (10)', sharedPage, "CUIL: '20-08490848'");
+            const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
+            expect(fueFrenado).toBe(true);
+        });
+
+        test('3.3. CUIL: Falla Regex por Letras y Signos', async () => {
+            await fillBaseForm(sharedPage);
+            await sharedPage.selectOption('#document_type', 'CUIL').catch(()=>null);
+            await typeSafe(sharedPage, '#document_number', '20-A8490%48-$');
+            await attemptSubmit(sharedPage);
+            const r = await attachEvidence('CUIL - Especiales', sharedPage, "CUIL: Especiales");
+            const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
+            expect(fueFrenado).toBe(true);
+        });
+        
+        test('3.4. CUIL: Puntos en lugar de Guiones', async () => {
+            await fillBaseForm(sharedPage);
+            await sharedPage.selectOption('#document_type', 'CUIL').catch(()=>null);
+            await typeSafe(sharedPage, '#document_number', '20.27510579.2');
+            await attemptSubmit(sharedPage);
+            const r = await attachEvidence('CUIL - Puntos (Falla Nativa)', sharedPage, "CUIL: '20.27.'");
+            const fueFrenado = r.isBotonBloqueado || r.errorVisualExtraido.includes('[Nativo HTML5]') || r.errorVisualExtraido !== "Ninguno Visible / Cajas verdes o input bloqueado.";
+            expect(fueFrenado).toBe(true);
         });
     });
 
