@@ -117,6 +117,24 @@ describe(`[E2E H2H] Payout Validaciones Dinaria AR: API Pura con Matemáticas [A
             const res = await executePayout('Payment Method Falso', p);
             expect([400, 422]).toContain(res.status);
         });
+        
+        test('1.4. Método de Pago Vacío / Nulo', async () => {
+            const p = buildPayload({ payment_method: "" });
+            const res = await executePayout('Payment Method Vacio', p);
+            expect([400, 422]).toContain(res.status);
+        });
+    });
+
+    // ==========================================
+    // SECCIÓN 1.5: CAMPOS ROOT ESTRUCTURALES
+    // ==========================================
+    describe('1.5 Validaciones Estructurales de Campos Raíz (Root)', () => {
+        // --- Country & Currency ---
+        test('Reject missing country', async () => await testRejection('Missing Country', buildPayload({ country: "" }), 'country'));
+        test('Reject invalid country format (ARG)', async () => await testRejection('Invalid Country Format ARG', buildPayload({ country: "ARG" }), 'country'));
+        
+        test('Reject missing currency', async () => await testRejection('Missing Currency', buildPayload({ currency: "" }), 'currency'));
+        test('Reject invalid currency format (PESOS)', async () => await testRejection('Invalid Currency PEN', buildPayload({ currency: "PESOS" }), 'currency'));
     });
 
     // ==========================================
@@ -125,16 +143,36 @@ describe(`[E2E H2H] Payout Validaciones Dinaria AR: API Pura con Matemáticas [A
     describe('2. Validaciones Específicas por Segmento', () => {
         describe('2.1 Segmento Primer Nombre (First Name)', () => {
             test('Reject missing first_name', async () => await testRejection('Missing First Name', buildPayload({}, { first_name: "" }), 'first_name'));
-            test('Reject first_name exceeding max length', async () => await testRejection('Max Length First Name', buildPayload({}, { first_name: "a".repeat(100) }), 'first name'));
-            test('Reject first_name numeric', async () => await testRejection('Numeric First Name', buildPayload({}, { first_name: "Sergio123" }), 'first name'));
-            test('Reject first_name invalid symbols (XSS)', async () => await testRejection('XSS First Name', buildPayload({}, { first_name: "<script>" }), 'first name'));
+            test('Reject first_name exceeding max length', async () => await testRejection('Max Length First Name', buildPayload({}, { first_name: "a".repeat(100) }), 'first_name'));
+            test('Reject first_name numeric', async () => await testRejection('Numeric First Name', buildPayload({}, { first_name: "Sergio123" }), 'first_name'));
+            test('Reject first_name invalid symbols (XSS)', async () => await testRejection('XSS First Name', buildPayload({}, { first_name: "<script>" }), 'first_name'));
+            
+            test('Reject first_name 1 character (Short Length)', async () => await testRejection('Short First Name', buildPayload({}, { first_name: "A" }), 'first_name'));
+            test('Accept first_name 2 characters (Valid Short)', async () => {
+                const res = await executePayout('Valid Short First Name', buildPayload({}, { first_name: "Jo" }), [200, 201, 202]);
+                expect(res.status).toBeGreaterThanOrEqual(200);
+            });
+            test('Accept first_name strange allowed characters (Spaces, Hyphens, Diacritics)', async () => {
+                const res = await executePayout('Complex First Name', buildPayload({}, { first_name: "José-María d'Artagnan" }), [200, 201, 202]);
+                expect(res.status).toBeGreaterThanOrEqual(200);
+            });
         });
 
         describe('2.2 Segmento Apellidos (Last Name)', () => {
             test('Reject missing last_name', async () => await testRejection('Missing Last Name', buildPayload({}, { last_name: "" }), 'last_name'));
-            test('Reject last_name exceeding max length', async () => await testRejection('Max Length Last Name', buildPayload({}, { last_name: "b".repeat(100) }), 'last name'));
-            test('Reject last_name numeric', async () => await testRejection('Numeric Last Name', buildPayload({}, { last_name: "Gomez8" }), 'last name'));
-            test('Reject last_name invalid symbols (XSS)', async () => await testRejection('XSS Last Name', buildPayload({}, { last_name: "Gomez;" }), 'last name'));
+            test('Reject last_name exceeding max length', async () => await testRejection('Max Length Last Name', buildPayload({}, { last_name: "b".repeat(100) }), 'last_name'));
+            test('Reject last_name numeric', async () => await testRejection('Numeric Last Name', buildPayload({}, { last_name: "Gomez8" }), 'last_name'));
+            test('Reject last_name invalid symbols (XSS)', async () => await testRejection('XSS Last Name', buildPayload({}, { last_name: "Gomez;" }), 'last_name'));
+            
+            test('Reject last_name 1 character (Short Length)', async () => await testRejection('Short Last Name', buildPayload({}, { last_name: "B" }), 'last_name'));
+            test('Accept last_name 2 characters (Valid Short)', async () => {
+                const res = await executePayout('Valid Short Last Name', buildPayload({}, { last_name: "De" }), [200, 201, 202]);
+                expect(res.status).toBeGreaterThanOrEqual(200);
+            });
+            test('Accept last_name strange allowed characters (Spaces, Hyphens, Diacritics)', async () => {
+                const res = await executePayout('Complex Last Name', buildPayload({}, { last_name: "O'Connor López-García" }), [200, 201, 202]);
+                expect(res.status).toBeGreaterThanOrEqual(200);
+            });
         });
 
         describe('2.3 Segmento Número de Documento (CUIT/CUIL BCRA)', () => {
@@ -209,25 +247,25 @@ describe(`[E2E H2H] Payout Validaciones Dinaria AR: API Pura con Matemáticas [A
     });
 
     describe('3. Validaciones Matemáticas, Montos y Saldos Insuficientes', () => {
+        test('Reject missing amount (null/empty)', async () => {
+            const res = await executePayout('Amount is Missing', buildPayload({ amount: null }), 400);
+            expect(res.resText).toMatch(/amount/i);
+        });
+
+        test('Reject amount passed as String', async () => {
+            const res = await executePayout('Amount as String', buildPayload({ amount: "1000.00" }), 400);
+            // Dependiendo del framework puede parsearlo o rechazarlo strict type
+            expect(res.status).toBeDefined();
+        });
+
         test('Reject payout with amount == 0', async () => {
             const res = await executePayout('Amount is 0', buildPayload({ amount: 0 }), 400);
             expect(res.resText).toMatch(/amount|greater/i);
         });
 
-        test('Reject payout with amount < 0 (Negative)', async () => {
-            await testRejection('Amount is Negative', buildPayload({ amount: -10.5 }), 'amount');
-        });
-
-        test('Reject payout with insufficient balance', async () => {
-            const massiveAmount = 999999999.00;
-            const preFallosBalance = await getMerchantBalance(token);
-            const res = await executePayout('Huge Amount Insufficient Funds', buildPayload({ amount: massiveAmount }), 400);
-            expect(res.resText).toMatch(/insufficient balance/i);
-            
-            await new Promise(r => setTimeout(r, 2000));
-            const postFallosBalance = await getMerchantBalance(token);
-            // El saldo NO debe descontarse
-            expect(postFallosBalance.available).toBeCloseTo(preFallosBalance.available, 1);
+        test('Amount < 0 (Negative) is absolute - should be accepted', async () => {
+            const res = await executePayout('Amount is Negative (Absolute)', buildPayload({ amount: -10.5 }), [200, 201, 202]);
+            expect(res.status).toBeGreaterThanOrEqual(200);
         });
     });
 

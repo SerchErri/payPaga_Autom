@@ -17,7 +17,7 @@ describe(`[E2E Híbrido] Payout H2H Argentina: API Generación + UI Validaciones
         token = await getAccessToken();
         try {
             browser = await chromium.launch({ headless: true });
-            context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
+            context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark', viewport: { width: 1920, height: 1080 } });
             page = await context.newPage();
             page.setDefaultTimeout(20000);
             await preLoadFunds(page, token, allure, 100000.00, 'AR');
@@ -37,6 +37,35 @@ describe(`[E2E Híbrido] Payout H2H Argentina: API Generación + UI Validaciones
                 const buffer = await page.screenshot({ fullPage: true });
                 await allure.attachment(`📸 Evidencia Visual: ${name}`, buffer, "image/png");
             } catch (e) { }
+        }
+    };
+
+    const filterBalance = (bal) => {
+        return {
+            general: bal.general,
+            available: bal.available,
+            fees: bal.fees,
+            taxes: bal.taxes
+        };
+    };
+
+    const captureRowEvidence = async (txId, label) => {
+        if (allure && allure.attachment) {
+            await page.evaluate(() => {
+                const wrappers = document.querySelectorAll('.table-responsive, [style*="overflow"], td, tr, table');
+                wrappers.forEach(w => { 
+                    if (w.style) {
+                        w.style.overflow = 'visible'; 
+                        w.style.overflowX = 'visible'; 
+                    }
+                });
+            }).catch(() => null);
+            
+            const targetRow = page.locator('tbody tr', { hasText: txId }).first();
+            const rowSnap = await targetRow.screenshot({ timeout: 5000 }).catch(() => null);
+            if (rowSnap) {
+                await allure.attachment(`📸 Evidencia Visual Grilla: Payout H2H Aislado - ${label}`, rowSnap, "image/png");
+            }
         }
     };
 
@@ -90,7 +119,7 @@ describe(`[E2E Híbrido] Payout H2H Argentina: API Generación + UI Validaciones
         await stateBtn.click({ force: true }).catch(() => null);
         await page.waitForTimeout(5000);
 
-        await attachScreenshot(`H2H Mercante Cambiado a ${statusToClick.toUpperCase()}`);
+        await captureRowEvidence(txId, statusToClick.toUpperCase());
     };
 
     test('1. Flujo Ómnicanal Happy Path: UI Saldos -> API Payout H2H -> Visto en M-Portal -> Admin Approve', async () => {
@@ -121,10 +150,7 @@ describe(`[E2E Híbrido] Payout H2H Argentina: API Generación + UI Validaciones
         await btnSalidas.click({ force: true }).catch(() => null);
         await page.waitForTimeout(6000);
 
-        if (allure && allure.attachment) {
-            const tableRowSnap = await page.locator('tbody tr').first().screenshot({ timeout: 5000 }).catch(() => null);
-            if (tableRowSnap) await allure.attachment(`📸 Evidencia Visual Grilla: Payout H2H Aislado`, tableRowSnap, "image/png");
-        }
+        await captureRowEvidence(generatedTxId, 'PENDING');
 
         // ==========================================
         // 5. ADMIN PORTAL (APROBACIÓN AGIL UI)
@@ -150,11 +176,11 @@ describe(`[E2E Híbrido] Payout H2H Argentina: API Generación + UI Validaciones
         expect(finalBalances.taxes !== undefined).toBeTruthy();
 
         if (allure && allure.attachment) {
-            await allure.attachment(`Cálculo y Auditoría H2H (Protección Paralela)`, JSON.stringify({
-                SITUACION_INICIAL: initialBalances,
-                CONGELAMIENTO_PENDING: pendingBalances,
-                SITUACION_FINAL: finalBalances,
-                MONTO_H2H_PROCESADO: payoutAmount
+            await allure.attachment(`Payout Audit and Calculation (Approve)`, JSON.stringify({
+                "Initial Balance": filterBalance(initialBalances),
+                "Intermediate Balance": filterBalance(pendingBalances),
+                "Current Balance": filterBalance(finalBalances),
+                "Payout Amount Final processing": payoutAmount
             }, null, 2), "application/json");
         }
     });
@@ -162,7 +188,8 @@ describe(`[E2E Híbrido] Payout H2H Argentina: API Generación + UI Validaciones
     test('2. Flujo Reverso H2H por FAILED: Generación API -> PENDING -> Dropdown Merchant (Failed) -> Reembolso', async () => {
         let revertMonto = 2500.50;
 
-        const initRevertBal = await loginAndCaptureDashboard(page, allure, true, 'AR');
+        // Se usa false para NO forzar login y continuar fluidamente desde donde quedó el Test 1
+        const initRevertBal = await loginAndCaptureDashboard(page, allure, false, 'AR');
         const myTx = await originarPayoutH2H(revertMonto, 'REVERSO_FAILED');
         expect(myTx).not.toBeNull();
 
@@ -178,14 +205,20 @@ describe(`[E2E Híbrido] Payout H2H Argentina: API Generación + UI Validaciones
         expect(finalRevertBal.available).toBeCloseTo(initRevertBal.available, 1);
 
         if (allure && allure.attachment) {
-            await allure.attachment(`Reporte Matemático Reverso H2H: FAILED`, JSON.stringify({ SALDO_ORIGINAL: initRevertBal, DEBITO_TEMPORAL: pendingBal, SALDO_DEVUELTO: finalRevertBal }, null, 2), "application/json");
+            await allure.attachment(`Payout Audit and Calculation (Failed)`, JSON.stringify({
+                "Initial Balance": filterBalance(initRevertBal),
+                "Intermediate Balance": filterBalance(pendingBal),
+                "Current Balance": filterBalance(finalRevertBal),
+                "Payout Amount Final processing": revertMonto
+            }, null, 2), "application/json");
         }
     });
 
     test('3. Flujo Reverso H2H por EXPIRED: Generación API -> PENDING -> Dropdown Merchant (Expired) -> Reembolso', async () => {
         let revertMonto = 2500.50;
 
-        const initRevertBal = await loginAndCaptureDashboard(page, allure, true, 'AR');
+        // Se usa false para NO forzar login y continuar fluidamente desde donde quedó el Test 2
+        const initRevertBal = await loginAndCaptureDashboard(page, allure, false, 'AR');
         const myTx = await originarPayoutH2H(revertMonto, 'REVERSO_EXPIRED');
         expect(myTx).not.toBeNull();
 
@@ -201,7 +234,12 @@ describe(`[E2E Híbrido] Payout H2H Argentina: API Generación + UI Validaciones
         expect(finalRevertBal.available).toBeCloseTo(initRevertBal.available, 1);
 
         if (allure && allure.attachment) {
-            await allure.attachment(`Reporte Matemático Reverso H2H: EXPIRED`, JSON.stringify({ SALDO_ORIGINAL: initRevertBal, DEBITO_TEMPORAL: pendingBal, SALDO_DEVUELTO: finalRevertBal }, null, 2), "application/json");
+            await allure.attachment(`Payout Audit and Calculation (Expired)`, JSON.stringify({
+                "Initial Balance": filterBalance(initRevertBal),
+                "Intermediate Balance": filterBalance(pendingBal),
+                "Current Balance": filterBalance(finalRevertBal),
+                "Payout Amount Final processing": revertMonto
+            }, null, 2), "application/json");
         }
     });
 
