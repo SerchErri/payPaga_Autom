@@ -6,23 +6,22 @@ const envConfig = require('../../../../../utils/envConfig');
 
 jest.setTimeout(1800000);
 
-describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`[E2E UI] Validaciones Interactivas Payout AR [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
     
     let browser;
     let context;
     let sharedPage;
-    let formUrl = '';
 
     beforeAll(async () => {
         browser = await chromium.launch({ headless: true });
-        context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
+        context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark', viewport: { width: 1920, height: 1080 } });
         sharedPage = await context.newPage();
         
         sharedPage.setDefaultTimeout(10000);
         
         try {
             const token = await getAccessToken();
-            await preLoadFunds(sharedPage, token, allure, 10000.00);
+            await preLoadFunds(sharedPage, token, allure, 10000.00, 'AR');
         } catch(e) { console.error("Fallo AutoFondeando", e); }
         
         let baseURL = envConfig.BASE_URL;
@@ -35,39 +34,25 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
         await sharedPage.getByRole('textbox', { name: 'Email' }).fill(envConfig.FRONTEND_PARAMS.email);
         await sharedPage.getByRole('textbox', { name: 'Contraseña' }).fill(envConfig.FRONTEND_PARAMS.password);
         
-        const btnLogin = sharedPage.getByRole('button', { name: 'Iniciar sesión' }).first();
+        const btnLogin = sharedPage.getByRole('button', { name: /Iniciar sesión|Login|Sign in/i }).first();
         await btnLogin.evaluate(node => node.disabled = false).catch(()=>null);
         await btnLogin.click({ force: true });
         
-        const btnTransacciones = sharedPage.getByRole('link', { name: ' Transacciones ' }).first();
-        await btnTransacciones.waitFor({ state: 'visible', timeout: 20000 });
-        
-        await sharedPage.waitForTimeout(3000); 
-        await btnTransacciones.click();
-        
-        const btnSalida = sharedPage.getByRole('link', { name: 'Transacciones de Salida' }).first();
-        await btnSalida.waitFor({ state: 'visible', timeout: 15000 });
-        await btnSalida.click();
-        
-        const btnCrear = sharedPage.getByRole('link', { name: 'Crear Pago' }).first();
-        await btnCrear.waitFor({ state: 'visible', timeout: 15000 });
-        await btnCrear.click();
-        
-        await sharedPage.waitForSelector('text=Monto', { timeout: 15000 }).catch(()=>null);
-        formUrl = sharedPage.url(); 
+        await sharedPage.waitForSelector('h3.text-2xl', { timeout: 20000 }).catch(()=>null);
     });
 
     afterAll(async () => {
         if (browser) await browser.close();
     });
 
-    const typeSafe = async (page, nameSelectorParams, textToType) => {
-        const loc = page.getByRole('textbox', nameSelectorParams).first();
+    const typeSafe = async (page, selector, textToType) => {
+        const loc = page.locator(selector);
         await loc.click({ timeout: 3000 }).catch(()=>null);
         await loc.fill('', { timeout: 3000 }).catch(()=>null); 
-        if (textToType !== null && textToType !== undefined) {
+        if (textToType !== null && textToType !== undefined && textToType !== '') {
              await loc.pressSequentially(textToType, { delay: 10, timeout: 5000 }).catch(()=>null);
         }
+        await loc.press('Tab').catch(()=>null);
     };
 
     const attachEvidence = async (testName, page, actionTaken) => {
@@ -90,32 +75,27 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
             } catch(e) {}
         }
 
-        const labelsToScan = ['Monto *', 'Nombre*', 'Apellido*', 'Número de Documento*', 'Número de Cuenta*'];
-        for (const lbl of labelsToScan) {
-            try {
-                const target = page.getByRole('textbox', { name: lbl }).first();
-                if (await target.count() > 0) {
-                    const msjNativo = await target.evaluate(el => el.validationMessage).catch(()=>null);
-                    if (msjNativo && msjNativo.trim().length > 0) {
-                        extractedTexts.push(`[Nativo HTML5]: ${msjNativo}`);
-                    }
-                }
-            } catch(e) {}
-        }
+        const isInvalidDOM = await page.evaluate(() => {
+            const invalidElements = document.querySelectorAll(':invalid');
+            if (invalidElements.length > 0) {
+                return Array.from(invalidElements).map(el => `[Nativo HTML5] ID: ${el.id || el.name} -> ${el.validationMessage}`);
+            }
+            return null;
+        });
+        
+        if (isInvalidDOM) extractedTexts.push(...isInvalidDOM);
         
         let isBotonBloqueadoOverride = false;
-        if (!page.url().includes('create') && !page.url().includes('create-payment')) {
+        if (!page.url().includes('create') && !page.url().includes('create-payment') && !page.url().includes('transactions/pay-out/')) {
              isBotonBloqueadoOverride = true; 
         }
         
-        if (extractedTexts.length > 0) {
-            errorVisualExtraido = [...new Set(extractedTexts)].join(" | ");
-        }
+        if (extractedTexts.length > 0) errorVisualExtraido = [...new Set(extractedTexts)].join(" | ");
         
         let isBotonBloqueado = isBotonBloqueadoOverride;
         if (!isBotonBloqueado) {
-            const btnSave = page.getByRole('button', { name: 'Crear Pago' }).first();
-            isBotonBloqueado = await btnSave.isDisabled().catch(()=>true);
+            const btnSave = page.locator('#save');
+            if (await btnSave.count() > 0) isBotonBloqueado = await btnSave.isDisabled().catch(()=>true);
         }
         
         const auditLog = {
@@ -127,6 +107,7 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
         allure.attachment(`📋 Extraccion de Error - ${testName}`, JSON.stringify(auditLog, null, 2), "application/json");
 
         try {
+            await page.waitForTimeout(500);
             const buffer = await page.screenshot({ fullPage: true });
             allure.attachment(`📸 Evidencia Final - ${testName}`, buffer, "image/png");
         } catch(e) { }
@@ -135,30 +116,32 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
     };
 
     const fillBaseForm = async (page) => {
-        if (!page.url().includes('/create')) {
-            await page.getByRole('link', { name: ' Transacciones ' }).first().click({ timeout: 5000 }).catch(()=>null);
-            await page.waitForTimeout(500);
-            await page.getByRole('link', { name: 'Transacciones de Salida' }).first().click({ timeout: 5000 }).catch(()=>null);
-            await page.waitForTimeout(500);
-            await page.getByRole('link', { name: 'Crear Pago' }).first().click({ timeout: 5000 }).catch(()=>null);
-            await page.waitForTimeout(2000);
+        const merchantUrl = envConfig.BASE_URL.replace("api", "merchant");
+        await page.goto(`${merchantUrl}/transactions/pay-out`).catch(()=>null);
+        await page.waitForLoadState('networkidle').catch(()=>null);
+        await page.waitForTimeout(1000);
+        
+        const btnCrear = page.getByRole('link', { name: /Crear|Create/i }).first();
+        await btnCrear.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null);
+        await btnCrear.click({ force: true });
+        
+        await page.waitForTimeout(1500);
+
+        await page.locator('#country').selectOption('AR').catch(()=>null);
+        await page.locator('#payment_method').selectOption('cvu').catch(()=>null);
+        
+        await typeSafe(page, '#amount', '120.00');
+        await typeSafe(page, '#first_name', 'Sergio');
+        await typeSafe(page, '#last_name', 'Test');
+        await typeSafe(page, '#document_number', '20275105792'); 
+        await typeSafe(page, '#account_number', '0070327530004025541644'); 
+        
+        // Disable Mocking para evitar impactar saldos reales
+        const disableMockCheck = page.locator('#disable_mock');
+        if (await disableMockCheck.isVisible().catch(()=>false)) {
+            const isChecked = await disableMockCheck.isChecked();
+            if (!isChecked) await disableMockCheck.click({ force: true });
         }
-
-        const bancosConfig = ['banco_pichincha', 'banco_guayaquil', 'produbanco'];
-        const cuentasConfig = ['Ahorro', 'Corriente'];
-        const randomBanco = bancosConfig[Math.floor(Math.random() * bancosConfig.length)];
-        const randomCuenta = cuentasConfig[Math.floor(Math.random() * cuentasConfig.length)];
-
-        await page.getByLabel('País *').selectOption('EC').catch(()=>null);
-        await page.waitForTimeout(2000); // ⏳ ESPERA A QUE CARGUE LA LISTA DE BANCOS 
-        await typeSafe(page, { name: 'Monto *' }, '150.23');
-        await typeSafe(page, { name: 'Nombre*' }, 'Sergio');
-        await typeSafe(page, { name: 'Apellido*' }, 'Errigo');
-        await page.getByLabel('Tipo de Documento*').selectOption('CI').catch(()=>null);
-        await typeSafe(page, { name: 'Número de Documento*' }, '1710034065');
-        try { await page.getByLabel('Banco*').selectOption(randomBanco, {timeout:3000}); } catch(e) { await page.getByLabel('Banco*').selectOption({index:1}).catch(()=>null); }
-        try { await page.getByLabel('Tipo de Cuenta*').selectOption(randomCuenta, {timeout:3000}); } catch(e) { await page.getByLabel('Tipo de Cuenta*').selectOption({index:1}).catch(()=>null); }
-        await typeSafe(page, { name: 'Número de Cuenta*' }, '12345678961');
     };
 
     const attemptSubmit = async (page) => {
@@ -171,10 +154,9 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
         }
         await page.mouse.click(0, 0);
         await page.waitForTimeout(500);
-        const btn = page.getByRole('button', { name: 'Crear Pago' }).first();
-        await btn.click({ force: true }).catch(()=>null);
-        
-        // Esperamos extra por si el backend arroja un <Toaster> tardío
+        const btnSave = page.locator('#save');
+        await btnSave.scrollIntoViewIfNeeded().catch(() => null);
+        await btnSave.click({ force: true }).catch(()=>null);
         await page.waitForTimeout(2000); 
     };
 
@@ -186,64 +168,69 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
                 allure.attachment("📸 Formulario Lleno (Antes de Enviar - OK)", buffer, "image/png");
             } catch(e) {}
         }
-        const btn = page.getByRole('button', { name: 'Crear Pago' }).first();
-        
-        // Hacer click natural para garantizar que el botón no esté disabled.
-        await btn.click();
-        
-        // Dar tiempo a la creación (Redirección o mensaje verde de éxito)
+        const btnSave = page.locator('#save');
+        await btnSave.scrollIntoViewIfNeeded().catch(() => null);
+        await btnSave.click().catch(()=>null); 
         await page.waitForTimeout(4000); 
-    };
-
-    const checkSystemDefect = (page, r, testScenario) => {
-        const urlCambio = !page.url().includes('create') && !page.url().includes('create-payment');
-        const isExito = r.errorVisualExtraido.toLowerCase().includes('éxito') || r.errorVisualExtraido.toLowerCase().includes('exito') || r.errorVisualExtraido.toLowerCase().includes('success');
-        if (urlCambio || isExito) {
-            throw new Error(`\n\n🚨 DEFECTO CRITICO DEL SISTEMA 🚨\nEl sistema permitió crear la transacción exitosamente con datos INVÁLIDOS.\nEscenario: ${testScenario}\nURL Actual: ${page.url()}\n\n`);
-        }
     };
 
     // ================================================================
     // SUITE 1: FIRST NAME
     // ================================================================
-    describe('1. Suite Payout UI: Nombres (First Name)', () => {
-        test('1.1. First Name: Corto (1 Letra)', async () => {
+    describe('1. Suite Payout UI AR: Nombres (First Name)', () => {
+        test('TC05: Validate Firstname With 2 Characters', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Nombre*' }, 'A'); 
+            await typeSafe(sharedPage, '#first_name', 'Al'); 
+            await attemptHappySubmit(sharedPage); 
+            const r = await attachEvidence('TC05', sharedPage, "Firstname: 'Al'");
+            expect(!sharedPage.url().includes('create') || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
+        });
+
+        test('TC06: Validate Firstname With Special Characters', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#first_name', "D'Arc"); 
+            await attemptHappySubmit(sharedPage); 
+            const r = await attachEvidence('TC06', sharedPage, "Firstname: D'Arc");
+            expect(!sharedPage.url().includes('create') || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
+        });
+
+        test('TC07: Reject Firstname With 1 Character', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#first_name', 'A'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('FN - 1L', sharedPage, "Nombre: 'A'");
+            const r = await attachEvidence('TC07', sharedPage, "Firstname: 'A'");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('1.2. First Name: Largo Máximo (> 50 Letras)', async () => {
+        test('TC08: Reject Firstname Exceeding 50 Characters', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Nombre*' }, 'A'.repeat(55)); 
+            await typeSafe(sharedPage, '#first_name', 'A'.repeat(55)); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('FN - 55L', sharedPage, "Nombre: Ax55");
+            const r = await attachEvidence('TC08', sharedPage, "Firstname: Ax55");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('1.3. First Name: Numéricos', async () => {
+        test('TC09: Reject Firstname With Symbols', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Nombre*' }, 'Sergio123'); 
+            await typeSafe(sharedPage, '#first_name', 'Sergio@!'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('FN - Numeros', sharedPage, "Nombre: 'Sergio123'");
+            const r = await attachEvidence('TC09', sharedPage, "Firstname: 'Sergio@!'");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('1.4. First Name: Símbolos XSS', async () => {
+        test('TC10: Reject Firstname With Numbers', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Nombre*' }, '<script>'); 
+            await typeSafe(sharedPage, '#first_name', 'Sergio123'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('FN - XSS', sharedPage, "Nombre: '<script>'");
+            const r = await attachEvidence('TC10', sharedPage, "Firstname: 'Sergio123'");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('1.5. First Name: Especiales (Emojis/Malformados)', async () => {
+        test('TC11: Reject Missing Firstname', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Nombre*' }, 'Sergio😎'); 
+            await typeSafe(sharedPage, '#first_name', ''); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('FN - Especiales', sharedPage, "Nombre: 'Sergio😎'");
+            const r = await attachEvidence('TC11', sharedPage, "Firstname: Vacío");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
     });
@@ -251,215 +238,221 @@ describe(`[E2E UI] Validaciones Interactivas Payout EC [Ambiente: ${envConfig.cu
     // ================================================================
     // SUITE 2: LAST NAME
     // ================================================================
-    describe('2. Suite Payout UI: Apellidos (Last Name)', () => {
-        test('2.1. Last Name: Corto (1 Letra)', async () => {
+    describe('2. Suite Payout UI AR: Apellidos (Last Name)', () => {
+        test('TC12: Validate Lastname With 2 Characters', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Apellido*' }, 'B'); 
+            await typeSafe(sharedPage, '#last_name', 'Ro'); 
+            await attemptHappySubmit(sharedPage); 
+            const r = await attachEvidence('TC12', sharedPage, "Lastname: 'Ro'");
+            expect(!sharedPage.url().includes('create') || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
+        });
+
+        test('TC13: Validate Lastname With Special Characters', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#last_name', "O'Brian"); 
+            await attemptHappySubmit(sharedPage); 
+            const r = await attachEvidence('TC13', sharedPage, "Lastname: O'Brian");
+            expect(!sharedPage.url().includes('create') || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
+        });
+
+        test('TC14: Reject Lastname With 1 Character', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#last_name', 'B'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('LN - 1L', sharedPage, "Apellido: 'B'");
+            const r = await attachEvidence('TC14', sharedPage, "Lastname: 'B'");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('2.2. Last Name: Largo (> 50 Letras)', async () => {
+        test('TC15: Reject Lastname Exceeding 50 Characters', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Apellido*' }, 'B'.repeat(55)); 
+            await typeSafe(sharedPage, '#last_name', 'B'.repeat(55)); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('LN - 55L', sharedPage, "Apellido: 'B'x55");
+            const r = await attachEvidence('TC15', sharedPage, "Lastname: Bx55");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('2.3. Last Name: Numéricos', async () => {
+        test('TC16: Reject Lastname With Symbols', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Apellido*' }, 'Perez8'); 
+            await typeSafe(sharedPage, '#last_name', 'Perez;'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('LN - Numeros', sharedPage, "Apellido: 'Perez8'");
+            const r = await attachEvidence('TC16', sharedPage, "Lastname: 'Perez;'");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('2.4. Last Name: Simbolos XSS', async () => {
+        test('TC17: Reject Lastname With Numbers', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Apellido*' }, 'Perez;'); 
+            await typeSafe(sharedPage, '#last_name', 'Perez8'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('LN - Simbolos', sharedPage, "Apellido: 'Perez;'");
+            const r = await attachEvidence('TC17', sharedPage, "Lastname: 'Perez8'");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('2.5. Last Name: Especiales (Chars Extremos)', async () => {
+        test('TC18: Reject Missing Lastname', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Apellido*' }, 'Perez¿'); 
+            await typeSafe(sharedPage, '#last_name', ''); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('LN - Especiales', sharedPage, "Apellido: 'Perez¿'");
-            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
-        });
-    });
-
-    // ================================================================
-    // SUITE 3: DOCUMENT TYPE & NUMBER
-    // ================================================================
-    describe('3. Suite Payout UI: Tipo y Numero de Documento', () => {
-        
-        test('3.0. DType: Ausencia de Tipo DL (Driving License)', async () => {
-            await fillBaseForm(sharedPage);
-            const selector = sharedPage.getByLabel('Tipo de Documento*').first();
-            const textoDropdown = await selector.innerText();
-            if (allure && allure.attachment) {
-                try {
-                    await selector.click();
-                    await sharedPage.waitForTimeout(500);
-                    const buffer = await sharedPage.screenshot({ fullPage: true });
-                    allure.attachment("📸 Evidencia Dropdown Documentos (Sin DL)", buffer, "image/png");
-                    await sharedPage.mouse.click(0, 0); 
-                } catch(e) {}
-            }
-            expect(textoDropdown.includes('DL')).toBe(false); 
-        });
-
-        test('3.1. CI: Faltan Caracteres (9 Digitos)', async () => {
-            await fillBaseForm(sharedPage);
-            await sharedPage.getByLabel('Tipo de Documento*').selectOption('CI');
-            await typeSafe(sharedPage, { name: 'Número de Documento*' }, '171003406'); 
-            await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('CI - 9 Digitos', sharedPage, "Documento: '171003406'");
-            checkSystemDefect(sharedPage, r, '3.1. CI: Faltan Caracteres (9 Digitos)');
-            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
-        });
-
-        test('3.2. CI: Excedente de Caracteres (11 Digitos)', async () => {
-            await fillBaseForm(sharedPage);
-            await sharedPage.getByLabel('Tipo de Documento*').selectOption('CI');
-            await typeSafe(sharedPage, { name: 'Número de Documento*' }, '17100340656'); 
-            await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('CI - 11 Digitos', sharedPage, "Documento: '17100340656'");
-            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
-        });
-
-        test('3.3. PP: Frontera Exitosa (13 Chars OK)', async () => {
-            await fillBaseForm(sharedPage);
-            await sharedPage.getByLabel('Tipo de Documento*').selectOption('PP');
-            const targetId = 'A1B2C3D4E5QW9';
-            await typeSafe(sharedPage, { name: 'Número de Documento*' }, targetId); 
-            
-            // Clic real natural ya que es un Happy Path permitido
-            await attemptHappySubmit(sharedPage);
-            const r = await attachEvidence('PP - 13 (OK)', sharedPage, `Documento: '${targetId}'`);
-            
-            // Evaluamos la fuga de URL (Significa que navegó hacia la tabla de reportes, éxito!) o muestra notificación verde
-            const urlCambio = !sharedPage.url().includes('create');
-            expect(urlCambio || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
-        });
-
-        test('3.4. PP: Falla Desborde (14 Digitos)', async () => {
-            await fillBaseForm(sharedPage);
-            await sharedPage.getByLabel('Tipo de Documento*').selectOption('PP');
-            await typeSafe(sharedPage, { name: 'Número de Documento*' }, 'A1B2C3D4E5QW9X'); 
-            await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('PP - 14 Digitos', sharedPage, "Documento: 'A1B2C3D4E5QW9X'");
-            checkSystemDefect(sharedPage, r, '3.4. PP: Falla Desborde (14 Digitos)');
+            const r = await attachEvidence('TC18', sharedPage, "Lastname: Vacío");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
     });
 
     // ================================================================
-    // SUITE 4: AMOUNT (MONTOS)
+    // SUITE 3: DOCUMENT NUMBER (CUIT/CUIL AR)
     // ================================================================
-    describe('4. Suite Payout UI: Comportamiento Monetario (Amount)', () => {
-        
-        test('4.1. Amount: Nulo o Vacío', async () => {
+    describe('3. Suite Payout UI AR: Documento (CUIT/CUIL)', () => {
+        test('TC19: Validate Document Number With Hyphens', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Monto *' }, null); 
+            await typeSafe(sharedPage, '#document_number', '20-27510579-2'); 
+            await attemptHappySubmit(sharedPage); 
+            const r = await attachEvidence('TC19', sharedPage, "Document: '20-27510579-2'");
+            expect(!sharedPage.url().includes('create') || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
+        });
+
+        test('TC20: Reject Document Number With Letters', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#document_number', '20A75105792'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('Amount - Vacio', sharedPage, "Monto: ''");
+            const r = await attachEvidence('TC20', sharedPage, "Document: '20A75105792'");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('4.2. Amount: Valor Negativo Absoluto', async () => {
+        test('TC21: Reject Empty Document Number', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Monto *' }, '-120.00'); 
+            await typeSafe(sharedPage, '#document_number', ''); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('Amount - Negativo', sharedPage, "Monto: '-120.00'");
+            const r = await attachEvidence('TC21', sharedPage, "Document: Vacío");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('4.3. Amount: Exceso Decimal (3 Decimales)', async () => {
+        test('TC22: Reject Document Number With 10 Digits', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Monto *' }, '100.555'); 
+            await typeSafe(sharedPage, '#document_number', '2012345678'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('Amount - 3 Decimales', sharedPage, "Monto: '100.555'");
+            const r = await attachEvidence('TC22', sharedPage, "Document: 10 Digits");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('4.4. Amount: 2 Decimales Exactos (OK)', async () => {
+        test('TC23: Reject Document Number With Prefix 19', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Monto *' }, '140.25'); 
-            
-            // Clic real natural Happy Path
-            await attemptHappySubmit(sharedPage);
-            const r = await attachEvidence('Amount - 2 Decimales (OK)', sharedPage, "Monto: '140.25'");
-            
-            const urlCambio = !sharedPage.url().includes('create');
-            expect(urlCambio || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
+            await typeSafe(sharedPage, '#document_number', '19275105792'); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('TC23', sharedPage, "Document: Prefix 19");
+            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
     });
 
     // ================================================================
-    // SUITE 5: CUENTA BANCARIA
+    // SUITE 4: ACCOUNT NUMBER (CBU/CVU)
     // ================================================================
-    describe('5. Suite Payout UI: Cuenta Bancaria', () => {
-        test('5.1. Account Number: Corta (<10 Digitos)', async () => {
+    describe('4. Suite Payout UI AR: Cuenta Bancaria (CVU/CBU)', () => {
+        test('TC24: Validate Valid CBU', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Número de Cuenta*' }, '123456789'); // 9
+            await typeSafe(sharedPage, '#account_number', '2850590940090418135201'); 
+            await attemptHappySubmit(sharedPage); 
+            const r = await attachEvidence('TC24', sharedPage, "Valid CBU");
+            expect(!sharedPage.url().includes('create') || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
+        });
+
+        test('TC25: Validate Valid CVU', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#account_number', '0000003100059258000000'); 
+            await attemptHappySubmit(sharedPage); 
+            const r = await attachEvidence('TC25', sharedPage, "Valid CVU");
+            expect(!sharedPage.url().includes('create') || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
+        });
+
+        test('TC26: Reject CBU Invalid Check-digit', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#account_number', '2850590940090418135209'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('Cuenta < 10', sharedPage, "Cuenta: '123456789'");
+            const r = await attachEvidence('TC26', sharedPage, "CBU Invalid Check-digit");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('5.2. Account Number: Larga (>20 Digitos)', async () => {
+        test('TC27: Reject CVU Invalid Check-digit', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Número de Cuenta*' }, '123456789012345678901'); // 21
+            await typeSafe(sharedPage, '#account_number', '0000003100059258000009'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('Cuenta > 20', sharedPage, "Cuenta: 21 Digitos");
+            const r = await attachEvidence('TC27', sharedPage, "CVU Invalid Check-digit");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('5.3. Account Number: Contaminada (Letras y Símbolos)', async () => {
+        test('TC28: Reject Empty Account Number', async () => {
             await fillBaseForm(sharedPage);
-            // La regex global es ^\\d{10,20}$
-            await typeSafe(sharedPage, { name: 'Número de Cuenta*' }, '123456X89!'); 
+            await typeSafe(sharedPage, '#account_number', ''); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('Cuenta Letras y Simb', sharedPage, "Cuenta: Alfanumerica");
+            const r = await attachEvidence('TC28', sharedPage, "Empty Account Number");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('5.4. Bank: Ausencia de Banco Seleccionado (Omitir)', async () => {
+        test('TC29: Reject CVU Not Starting With 000', async () => {
             await fillBaseForm(sharedPage);
-            // Forza deseleccionar (Opción "Seleccione un Banco" que suele ser index 0 o string vacío)
-            await sharedPage.getByLabel('Banco*').selectOption({index: 0}).catch(()=>null);
-            await attemptSubmit(sharedPage);
-            const r = await attachEvidence('Banco - Omitido', sharedPage, "Banco: (Vacio)");
+            await typeSafe(sharedPage, '#account_number', '1110003100059258000000'); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('TC29', sharedPage, "CVU Not Starting 000");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('5.5. Account Type: Enumeradores Inválidos (VISTA)', async () => {
+        test('TC30: Reject CVU With Blocked Digit', async () => {
             await fillBaseForm(sharedPage);
-            const selector = sharedPage.getByLabel('Tipo de Cuenta*').first();
-            const textoDropdown = await selector.innerText();
-            if (allure && allure.attachment) {
-                try {
-                    await selector.click();
-                    await sharedPage.waitForTimeout(500);
-                    const buffer = await sharedPage.screenshot({ fullPage: true });
-                    allure.attachment("📸 Evidencia Dropdown Cuenta (Sin VISTA)", buffer, "image/png");
-                    await sharedPage.mouse.click(0, 0); 
-                } catch(e) {}
-            }
-            expect(textoDropdown.toLowerCase().includes('vista')).toBe(false); 
+            // 0000003100059258000001
+            await typeSafe(sharedPage, '#account_number', '0000003100059258000001'); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('TC30', sharedPage, "CVU Blocked Digit");
+            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
 
-        test('5.6. Account Number: Omitido (Vacío)', async () => {
+        test('TC31: Reject CVU Block 2 Invalid Check-digit', async () => {
             await fillBaseForm(sharedPage);
-            await typeSafe(sharedPage, { name: 'Número de Cuenta*' }, null); 
+            // Block 1: 00000031. Block 2: 00059258000009
+            await typeSafe(sharedPage, '#account_number', '0000003100059258000009'); 
             await attemptSubmit(sharedPage); 
-            const r = await attachEvidence('Cuenta Omitida', sharedPage, "Cuenta: (Nula)");
+            const r = await attachEvidence('TC31', sharedPage, "CVU Block 2 Invalid Check-digit");
+            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
+        });
+
+        test('TC32: Reject Account Number With 21 Digits', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#account_number', '000000310005925800000'); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('TC32', sharedPage, "Account Number 21 Digits");
+            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
+        });
+    });
+
+    // ================================================================
+    // SUITE 5: AMOUNT (MONTOS)
+    // ================================================================
+    describe('5. Suite Payout UI AR: Comportamiento Monetario (Amount)', () => {
+        test('TC33: Validate Negative Amount As Absolute', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#amount', '-120.00'); 
+            await attemptHappySubmit(sharedPage); 
+            const r = await attachEvidence('TC33', sharedPage, "Negative Amount As Absolute");
+            expect(!sharedPage.url().includes('create') || r.errorVisualExtraido.includes('exito') || !r.isBotonBloqueado).toBe(true);
+        });
+
+        test('TC34: Reject String In Amount', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#amount', 'CIEN'); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('TC34', sharedPage, "String In Amount");
+            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
+        });
+
+        test('TC35: Reject Missing Amount', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#amount', ''); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('TC35', sharedPage, "Missing Amount");
+            expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
+        });
+
+        test('TC36: Reject Amount 0', async () => {
+            await fillBaseForm(sharedPage);
+            await typeSafe(sharedPage, '#amount', '0.00'); 
+            await attemptSubmit(sharedPage); 
+            const r = await attachEvidence('TC36', sharedPage, "Amount 0");
             expect(r.isBotonBloqueado || r.errorVisualExtraido.length > 0).toBe(true);  
         });
     });
