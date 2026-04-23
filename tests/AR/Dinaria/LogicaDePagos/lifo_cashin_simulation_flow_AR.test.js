@@ -153,7 +153,7 @@ describe(`[Logica Financiera] Dinaria AR: Batch LIFO Payouts [Env: ${envConfig.c
     };
 
     const simulateDinariaCashIn = async (extractedCbu, targetCuit, injectAmount, reference) => {
-        const sandboxToken = process.env.DINARIA_SANDBOX_TOKEN || 'di_sand_reg_paypaga_merch';
+        const sandboxToken = process.env.DINARIA_SANDBOX_TOKEN || 'di_sand_c99ad6fbcf5332c02f8a0c486da534f668afc295';
         const simPayload = {
             "cbu": extractedCbu,
             "cuit": targetCuit,
