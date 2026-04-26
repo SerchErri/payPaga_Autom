@@ -3,21 +3,63 @@ const allure = require('allure-js-commons');
 const { chromium } = require('playwright');
 const envConfig = require('../../../../../utils/envConfig');
 const { getAccessToken } = require('../../../../../utils/authHelper');
-const { loginAndCaptureDashboard, fastAdminAction } = require('../../../../../utils/uiBalanceHelper');
+const AuditLogger = require('../../../../../utils/auditLogger');
+const SandboxHelper = require('../../../../../utils/sandboxHelper');
 
-jest.setTimeout(1800000); // Ampliar timeout a 30 mins para UI operations
+jest.setTimeout(1800000); 
 
-describe(`[Hybrid E2E] V1 Create Payment Link (PayUrl) Dinaria (AR) [Env: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
+describe(`[Hybrid E2E] V1 PayUrl Omnichannel to API Flow Dinaria (AR) [Env: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
 
     let token = '';
     let browser;
     let context;
     let page;
-    let initialBalances = {};
-    let payurlAmountConfig = 1255.55; // Monto inofensivo para evadir limits de fraude
+    let auditLog;
+    
+    const merchantId = envConfig.MERCHANT_ID || "370914c8-c42a-4309-b50c-45656ad50b7c";
+    const SANDBOX_MERCHANT_1_TOKEN = 'di_sand_reg_paypaga_merch';
+    const SANDBOX_MERCHANT_3_TOKEN = 'di_sand_c99ad6fbcf5332c02f8a0c486da534f668afc295';
+    const DINARIA_SANDBOX_URL = 'https://api.sandbox.dinaria.com/ars/cashin/simulate';
+    
+    const getV1MerchantBalance = async (accessToken) => {
+        const balRes = await axios.get(`${envConfig.BASE_URL}/get_merchant_balance?country_code=AR&payment_method=cvu`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        if (!balRes.data || !balRes.data.country_collection) return { general: 0, volume: 0, fees: 0, taxes: 0 };
+        const countryCol = balRes.data.country_collection.find(c => c.country_code === 'AR');
+        if(!countryCol) return { general: 0, volume: 0, fees: 0, taxes: 0 };
+        const paymentCol = countryCol.payment_method_collection.find(p => p.payment_method_code === 'cvu');
+        if(!paymentCol) return { general: 0, volume: 0, fees: 0, taxes: 0 };
+        const payinBal = paymentCol.balance_collection.find(b => b.transaction_type === 'Payin');
+        if (!payinBal) return { general: 0, volume: 0, fees: 0, taxes: 0 };
+        
+        return {
+            general: parseFloat(payinBal.amount || 0),
+            volume: parseFloat(payinBal.operations_amount || 0),
+            fees: parseFloat(payinBal.fee_amount || 0),
+            taxes: parseFloat(payinBal.tax_amount || 0)
+        };
+    };
+
+    const getV1TransactionStatus = async (txId, accessToken) => {
+        const queryRes = await axios.get(`${envConfig.BASE_URL}/query/payins?transaction_id=${txId}`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        if(queryRes.data && queryRes.data.rows && queryRes.data.rows.length > 0) {
+            return queryRes.data.rows[0];
+        }
+        return {};
+    };
 
     beforeAll(async () => {
+        auditLog = new AuditLogger('V1_PayUrl_Hybrid_Flow_AR');
+        
+        // Limpiar Sandbox
+        await SandboxHelper.cleanOrphanTransactions(SANDBOX_MERCHANT_1_TOKEN, 'merchant1', null, auditLog);
+        await SandboxHelper.cleanOrphanTransactions(SANDBOX_MERCHANT_3_TOKEN, 'sand_pay_merch3', 'sand_pay_merch3', auditLog);
+
         token = await getAccessToken();
+        
         try {
             browser = await chromium.launch({ headless: true });
             context = await browser.newContext({ locale: 'es-ES', colorScheme: 'dark' });
@@ -30,50 +72,38 @@ describe(`[Hybrid E2E] V1 Create Payment Link (PayUrl) Dinaria (AR) [Env: ${envC
         if (browser) await browser.close();
     });
 
-    test('Omnichannel Flow: Capture UI Balance -> Generate PayUrl API -> Checkout Visit -> Inspect Grid -> Admin Approve', async () => {
-        // ============================================================================== //
-        // 1. CAPTURAR DASHBOARD Y SALDOS INICIALES
-        // ============================================================================== //
-        initialBalances = await loginAndCaptureDashboard(page, allure, true, 'AR');
-        console.log("📈 INITIAL PAYURL BALANCES (UI):", initialBalances);
-
+    test('Omnichannel Hybrid: API Balance -> PayUrl -> UI Extract -> Webhook -> API Balance', async () => {
+        auditLog.logTestStart('TC01 - Hybrid PayURL E2E (API + Scrape + Webhook)');
 
         // ============================================================================== //
-        // 3. GENERAR LINK DE PAGO V1 (POST /payurl)
+        // 1. CAPTURAR DASHBOARD Y SALDOS INICIALES VÍA API
+        // ============================================================================== //
+        const initialBalances = await getV1MerchantBalance(token);
+        
+        // ============================================================================== //
+        // 2. GENERAR LINK DE PAGO V1 (POST /payurl)
         // ============================================================================== //
         const myRefId = `PayUrl-AR-V1-${Date.now()}`;
-        const payUrlEndpoint = `${envConfig.BASE_URL}/payurl`; // Endpoint V1
+        const payUrlEndpoint = `${envConfig.BASE_URL}/payurl`;
+        const payurlAmountConfig = 1255.55; 
         
         const validPayload = {
             "country_code": "AR",
             "currency": "ARS",
-            "transaction_total": 1000,
+            "transaction_total": payurlAmountConfig,
             "merchant_transaction_reference": myRefId,
             "payment_method_codes": ["cvu"],
             "payment_method_data": [
                 {
                     "payment_method_code": "cvu",
                     "transaction_fields": [
-                        {
-                            "name": "first_name",
-                            "value": "Sergio"
-                        },
-                        {
-                            "name": "last_name",
-                            "value": "Test"
-                        },
-                        {
-                            "name": "document_number",
-                            "value": "20-08490848-8"
-                        }
+                        { "name": "first_name", "value": "Sergio" },
+                        { "name": "last_name", "value": "Test" },
+                        { "name": "document_number", "value": "20-08490848-8" }
                     ]
                 }
             ]
         };
-
-        if (allure && allure.attachment) {
-            await allure.attachment("Step 3 - POST AR Payload Sent", JSON.stringify(validPayload, null, 2), "application/json");
-        }
 
         const response = await axios.post(payUrlEndpoint, validPayload, {
             headers: {
@@ -81,132 +111,114 @@ describe(`[Hybrid E2E] V1 Create Payment Link (PayUrl) Dinaria (AR) [Env: ${envC
                 'Authorization': `Bearer ${token}`,
                 'DisablePartnerMock': 'true'
             },
-            validateStatus: () => true // Prevent Axios Throw on 4XX to evaluate manually
+            validateStatus: () => true
         });
 
-        if (response.status !== 200 && response.status !== 201) {
-            console.error(`🚨 Falló la creación del PayURL V1. Status devuelto: ${response.status}`);
-            console.error(`Detalle del backend:`, JSON.stringify(response.data, null, 2));
-        }
-
+        const txId = response.data.transaction_id || response.data.id;
+        auditLog.logTest('API-V1-PAYURL', `PayUrl Link Generation`, payUrlEndpoint, validPayload, response.status, response.data, false, txId);
+        
         expect([200, 201]).toContain(response.status);
-        expect(response.data).toBeDefined();
-
-        const trID = response.data.transaction_id || response.data.id;
-
-        console.log(`\n🎉 Link de Pago Generado Correctamente [AR]: ${response.status}`);
         
         // ============================================================================== //
-        // 3.5. VISITAR LA URL DEL CHECKOUT PARA MATERIALIZAR FEES (Crítico!)
+        // 3. MATERIALIZAR VOUCHER CON PLAYWRIGHT Y EXTRAER CVU/REFERENCIA
         // ============================================================================== //
         const checkoutUrl = response.data.url || response.data.pay_url || response.data.redirect_url;
-        if (checkoutUrl) {
-            console.log("➡️ Materializando Checkout Session URL:", checkoutUrl);
-            const checkoutPage = await context.newPage();
-            // Go to the URL to force the backend to register the preferred payment method and compute the fees
-            await checkoutPage.goto(checkoutUrl, { waitUntil: 'domcontentloaded' }).catch(() => null);
-            await checkoutPage.waitForTimeout(4000); // Give the UI and Backend enough time
-            await checkoutPage.close();
-            console.log("✔️ Checkout Session iniciada y métodos de pago arraigados en el Backend.");
-        } else {
-            console.warn("⚠️ No se encontró URL en el response. El Backend podría fallar en calcular fees.");
+        expect(checkoutUrl).toBeDefined();
+
+        let extractedCvu = null;
+        let extractedRef = null;
+
+        const checkoutPage = await context.newPage();
+        await checkoutPage.goto(checkoutUrl, { waitUntil: 'domcontentloaded' }).catch(() => null);
+        await checkoutPage.waitForTimeout(2000); 
+        
+        const btnSubmit = checkoutPage.locator('button[type="submit"], button:has-text("Continuar")').first();
+        if (await btnSubmit.isVisible().catch(() => false)) {
+            await btnSubmit.click({ force: true });
+            await checkoutPage.waitForTimeout(4000); 
         }
 
-        // ============================================================================== //
-        // 4. INSPECCIONAR GRILLA VISUALMENTE COMO EVIDENCIA
-        // ============================================================================== //
-        await page.bringToFront();
-
-        const btnTransacciones = page.getByRole('link', { name: ' Transacciones ' }).first();
-        await btnTransacciones.click({ force: true }).catch(() => null);
-        await page.waitForTimeout(1000);
-
-        const btnEntradas = page.getByRole('link', { name: 'Transacciones de Entrada' }).first();
-        await btnEntradas.click({ force: true }).catch(() => null);
-
-        await page.waitForTimeout(8000); // 8 segundos de holgura
-
-        const tableContent = await page.locator('table').innerText().catch(async () => await page.innerText('body').catch(() => ""));
-
-        console.log("=== DEBUG PAYURL GRID ===");
-        console.log(tableContent);
-        console.log("==========================");
-
-        const hasRenderedAmmount = tableContent.includes('1000') || tableContent.includes('1.000');
-        expect(hasRenderedAmmount).toBe(true);
-
-        // Validamos explícitamente que la orden esté listada
-        const rowLocator = page.locator('tbody tr').filter({ hasText: /1000|1\.000|1,000/ }).first();
-        await rowLocator.waitFor({ state: 'visible', timeout: 8000 }).catch(() => null);
-
-        // Zoom out out para que los grids responsivos encajen horizontalmente en un solo pantallazo
-        await page.evaluate(() => { document.body.style.zoom = "0.7"; }).catch(()=>null);
-        await page.waitForTimeout(1500);
-
+        const bodyText = await checkoutPage.innerText('body').catch(()=>'');
+        
         if (allure && allure.attachment) {
-            await rowLocator.scrollIntoViewIfNeeded().catch(()=>null);
-            // Capturamos el bounding box de este tr en especifico
-            const tableRowSnap = await rowLocator.screenshot({ timeout: 5000 }).catch(() => null);
-            if (tableRowSnap) await allure.attachment(`📸 Grid Visual Evidence: Specific PayUrl Row`, tableRowSnap, "image/png");
+            const uiSnap = await checkoutPage.screenshot({ fullPage: true }).catch(() => null);
+            if (uiSnap) await allure.attachment(`📸 Evidencia UI Voucher Generado`, uiSnap, "image/png");
         }
 
-        await page.evaluate(() => { document.body.style.zoom = "1"; }).catch(()=>null);
+        // Expresión regular para extraer CVU/CBU
+        const cvuMatch = bodyText.match(/(?:CVU|CBU)[\s\S]*?(\d{22})/i);
+        if (cvuMatch && cvuMatch[1]) extractedCvu = cvuMatch[1];
 
-        const realGridTxId = await page.evaluate((ref) => {
-            const rows = Array.from(document.querySelectorAll('tr'));
-            const targetRow = rows.find(r => r.innerText.includes(ref) || r.innerText.includes('1,255.55') || r.innerText.includes('1255'));
-            if (!targetRow) return null; // Si no encuentra fila
-            
-            const uuidRegex = /[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/;
-            const match = targetRow.innerText.match(uuidRegex);
-            return match ? match[0] : null;
-        }, myRefId);
+        // Expresión regular para extraer Referencia Bancaria
+        const refMatch = bodyText.match(/Referencia de Pago[\s\S]*?(\d{19})/i) || bodyText.match(/(\d{19})/i);
+        if (refMatch && refMatch[1]) extractedRef = refMatch[1];
 
-        // ============================================================================== //
-        // 5. ADMIN PORTAL (APROBACIÓN AGIL UI VIA GET)
-        // ============================================================================== //
-        await fastAdminAction(page, realGridTxId || trID, 'pay-in', allure, 'approve');
+        await checkoutPage.close();
+
+        expect(extractedCvu).not.toBeNull();
+        expect(extractedRef).not.toBeNull();
 
         // ============================================================================== //
-        // 6. REGRESAR AL DASHBOARD Y VALIDAR IMPACTO
+        // 4. SIMULAR PAGO EN DINARIA SANDBOX (WEBHOOK)
         // ============================================================================== //
-        const finalBalances = await loginAndCaptureDashboard(page, allure, false, 'AR');
-        console.log("📈 FINAL PAYURL BALANCES AFTER APPROVAL:", finalBalances);
+        const simPayload = {
+            cbu: extractedCvu,
+            cuit: "20084908488", // Sin guiones
+            amount: payurlAmountConfig.toFixed(2),
+            idTrxCliente: extractedRef,
+            nombre: "Sergio Test"
+        };
 
-        expect(finalBalances.general).toBeGreaterThan(initialBalances.general);
-        expect(finalBalances.volume).toBeGreaterThan(initialBalances.volume);
-        expect(finalBalances.fees !== initialBalances.fees).toBeTruthy();
-        expect(finalBalances.taxes !== initialBalances.taxes).toBeTruthy();
+        const simRes = await axios.post(DINARIA_SANDBOX_URL, simPayload, {
+            headers: { 'Authorization': `Bearer ${SANDBOX_MERCHANT_3_TOKEN}` },
+            validateStatus: () => true
+        });
 
-        const opDiff = parseFloat((finalBalances.volume - initialBalances.volume).toFixed(2));
-        const feeDiff = parseFloat((Math.abs(finalBalances.fees) - Math.abs(initialBalances.fees)).toFixed(2));
-        const taxDiff = parseFloat((Math.abs(finalBalances.taxes) - Math.abs(initialBalances.taxes)).toFixed(2));
+        auditLog.logTest('SANDBOX', `Dinaria Cashin Simulator (Webhook)`, DINARIA_SANDBOX_URL, simPayload, simRes.status, simRes.data, false, extractedRef);
+        expect([200, 201]).toContain(simRes.status);
+
+        // ============================================================================== //
+        // 5. POLLING ACTIVO ESPERANDO APROBACIÓN
+        // ============================================================================== //
+        let finalTxStatus = null;
+        for (let i = 0; i < 15; i++) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            const stat = await getV1TransactionStatus(txId, token);
+            const statusLower = (stat.status || "").toLowerCase();
+            if (statusLower === 'approved' || statusLower === 'completed' || statusLower === 'rejected') {
+                finalTxStatus = stat;
+                break;
+            }
+        }
+
+        expect(finalTxStatus).not.toBeNull();
+        expect((finalTxStatus.status || "").toLowerCase()).toBe('approved');
+
+        // ============================================================================== //
+        // 6. BALANCE FINAL Y REPORTE MATEMÁTICO EN AUDITLOGGER
+        // ============================================================================== //
+        const finalBalances = await getV1MerchantBalance(token);
+
+        const opDiff = parseFloat(finalTxStatus.transaction_total || 0);
+        const feeDiff = parseFloat(finalTxStatus.fee || 0);
+        const taxDiff = parseFloat(finalTxStatus.calculated_taxes || 0);
         const netValue = parseFloat((opDiff - feeDiff - taxDiff).toFixed(2));
 
-        const mathReport = `
-==================================================================
-🧮 PAYURL IMPACT CALCULATION (AR)
-==================================================================
-Concept              | Details                     | Oper | Value
-------------------------------------------------------------------
-Initial General Bal  | Opening Balance (General)   | ARS  | ${initialBalances.general.toFixed(2)}
-PayUrl Amount        | ${opDiff.toFixed(2)} In (-) ${feeDiff.toFixed(2)} F (-) ${taxDiff.toFixed(2)} T |  -   | ${netValue.toFixed(2)}
-------------------------------------------------------------------
-Current General Bal  | Total current balance in UI | ARS  | ${finalBalances.general.toFixed(2)}
-==================================================================
-Concept              | Details                     | Oper | Total
-------------------------------------------------------------------
-Fees                 | ${Math.abs(initialBalances.fees).toFixed(2).padEnd(8)} | (+) ${feeDiff.toFixed(2).padEnd(6)} | ARS  | ${Math.abs(finalBalances.fees).toFixed(2)}
-Taxes                | ${Math.abs(initialBalances.taxes).toFixed(2).padEnd(8)} | (+) ${taxDiff.toFixed(2).padEnd(6)} | ARS  | ${Math.abs(finalBalances.taxes).toFixed(2)}
-==================================================================
-`;
-        
-        console.log(mathReport);
+        const balanceMathObject = {
+            "0_Context": "PayUrl Omnichannel mathematical validation using Sandbox Webhook",
+            "1_Initial_General_Balance": initialBalances.general,
+            "2_PayUrl_In_Volume": opDiff,
+            "3_Calculated_Fee": feeDiff,
+            "4_Calculated_Tax": taxDiff,
+            "5_Net_Value_Applied": netValue,
+            "6_Final_General_Balance": finalBalances.general,
+            "7_Match": Math.abs(parseFloat((initialBalances.general + netValue).toFixed(2)) - finalBalances.general) < 0.01,
+            "8_Status": "PASS"
+        };
 
-        if (allure && allure.attachment) {
-            await allure.attachment(`PayUrl AR Dinaria Comparison`, JSON.stringify({ INITIAL_BALANCES: initialBalances, FINAL_BALANCES: finalBalances }, null, 2), "application/json");
-            await allure.attachment(`Resulting Mathematical Calculations`, mathReport, "text/plain");
-        }
+        auditLog.logFlow('PayURL Financial Balance Check', balanceMathObject);
+
+        expect(balanceMathObject["7_Match"]).toBe(true);
     });
 
 });

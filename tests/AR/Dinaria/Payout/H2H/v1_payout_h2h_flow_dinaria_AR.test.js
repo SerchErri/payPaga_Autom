@@ -4,6 +4,7 @@ const { chromium } = require('playwright');
 const { getAccessToken } = require('../../../../../utils/authHelper');
 const envConfig = require('../../../../../utils/envConfig');
 const { loginAndCaptureDashboard, fastAdminAction, preLoadFunds } = require('../../../../../utils/uiBalanceHelper');
+const AuditLogger = require('../../../../../utils/auditLogger');
 
 describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validaciones [Amb: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
     let token = '';
@@ -12,6 +13,7 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
     let page;
     let initialBalances = {};
     let payoutAmount = 2500.50; // Fijo para aserciones matemáticas (ARS)
+    let auditLog;
 
     beforeAll(async () => {
         token = await getAccessToken();
@@ -22,6 +24,7 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
             page.setDefaultTimeout(20000);
             await preLoadFunds(page, token, allure, 100000.00, 'AR');
         } catch (e) { console.error("Fallo levantando Playwright", e); }
+        auditLog = new AuditLogger('V1_Payout_H2H_Flow_Dinaria_AR');
     });
 
     afterAll(async () => {
@@ -295,13 +298,16 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
         expect(finalBalances.fees !== undefined).toBeTruthy();
         expect(finalBalances.taxes !== undefined).toBeTruthy();
 
+        const flowData = {
+            "1. Initial Balance (Before Payout)": filterBalance(initialBalances),
+            "2. Intermediate Balance (Funds Frozen)": filterBalance(pendingBalances),
+            "3. Final Balance (After Approval)": filterBalance(finalBalances),
+            "Payout Amount Processed": payoutAmount
+        };
+        auditLog.logFlow('TC-01', 'Happy Path: UI Balances -> API Payout H2H -> Approve', flowData);
+
         if (allure && allure.attachment) {
-            await allure.attachment(`Payout Audit and Calculation (Approve)`, JSON.stringify({
-                "1. Initial Balance (Before Payout)": filterBalance(initialBalances),
-                "2. Intermediate Balance (Funds Frozen)": filterBalance(pendingBalances),
-                "3. Final Balance (After Approval)": filterBalance(finalBalances),
-                "Payout Amount Processed": payoutAmount
-            }, null, 2), "application/json");
+            await allure.attachment(`Payout Audit and Calculation (Approve)`, JSON.stringify(flowData, null, 2), "application/json");
         }
     });
 
@@ -337,14 +343,17 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
         });
 
         await allure.step("6. Adjuntar Auditoría de Saldos", async () => {
+            const flowData = {
+                "1. Initial Balance (Before Payout)": filterBalance(initRevertBal),
+                "2. Intermediate Balance (Funds Frozen)": filterBalance(pendingBal),
+                "3. Final Balance (Funds Refunded)": filterBalance(finalRevertBal),
+                "Payout Amount Attempted": revertMonto,
+                "Is Refund Successful? (Initial == Final)": initRevertBal.available === finalRevertBal.available
+            };
+            auditLog.logFlow('TC-02', 'H2H Reversal (FAILED)', flowData);
+
             if (allure && allure.attachment) {
-                await allure.attachment(`Payout Audit and Calculation (Failed)`, JSON.stringify({
-                    "1. Initial Balance (Before Payout)": filterBalance(initRevertBal),
-                    "2. Intermediate Balance (Funds Frozen)": filterBalance(pendingBal),
-                    "3. Final Balance (Funds Refunded)": filterBalance(finalRevertBal),
-                    "Payout Amount Attempted": revertMonto,
-                    "Is Refund Successful? (Initial == Final)": initRevertBal.available === finalRevertBal.available
-                }, null, 2), "application/json");
+                await allure.attachment(`Payout Audit and Calculation (Failed)`, JSON.stringify(flowData, null, 2), "application/json");
             }
         });
     });
@@ -432,13 +441,16 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
             finalInsfBal = await loginAndCaptureDashboard(page, allure, false, 'AR');
             expect(finalInsfBal.available).toBeCloseTo(initInsfBal.available, 1);
 
+            const flowData = {
+                "1. Initial Balance (Before Payout)": filterBalance(initInsfBal),
+                "2. Attempted Payout Amount (Exceeds Available)": excessMonto,
+                "3. Final Balance (Unchanged)": filterBalance(finalInsfBal),
+                "Is Balance Protected? (Initial == Final)": initInsfBal.available === finalInsfBal.available
+            };
+            auditLog.logFlow('TC-03', 'Negative H2H: Insufficient Funds', flowData);
+
             if (allure && allure.attachment) {
-                await allure.attachment(`Payout Audit and Calculation (Insufficient Funds)`, JSON.stringify({
-                    "1. Initial Balance (Before Payout)": filterBalance(initInsfBal),
-                    "2. Attempted Payout Amount (Exceeds Available)": excessMonto,
-                    "3. Final Balance (Unchanged)": filterBalance(finalInsfBal),
-                    "Is Balance Protected? (Initial == Final)": initInsfBal.available === finalInsfBal.available
-                }, null, 2), "application/json");
+                await allure.attachment(`Payout Audit and Calculation (Insufficient Funds)`, JSON.stringify(flowData, null, 2), "application/json");
             }
         });
     });

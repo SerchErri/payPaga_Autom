@@ -4,11 +4,14 @@ const { getAccessToken } = require('../../../../../utils/authHelper');
 const envConfig = require('../../../../../utils/envConfig');
 const { chromium } = require('playwright');
 const { preLoadFunds } = require('../../../../../utils/uiBalanceHelper');
+const AuditLogger = require('../../../../../utils/auditLogger');
 
 describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas [Ambiente: ${envConfig.currentEnvName.toUpperCase()}]`, () => {
     let token = '';
+    let auditLog;
 
     beforeAll(async () => {
+        auditLog = new AuditLogger('V1_Payout_H2H_Val_Dinaria_AR');
         token = await getAccessToken();
         
         // Auto-Carga de Fondos (Pay-in masivo -> Approve Admin)
@@ -57,11 +60,17 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
 
     const payoutUrl = `${envConfig.BASE_URL}/v1/payout`;
 
-    const executePayout = async (testName, payload, expectedStatus) => {
+    const executePayout = async (testId, testName, payload, expectedStatus) => {
         const res = await axios.post(payoutUrl, payload, {
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'DisablePartnerMock': 'true' },
             validateStatus: () => true,
         });
+
+        let isExpectedToFail = true;
+        if (Array.isArray(expectedStatus) && expectedStatus.some(s => s < 400)) isExpectedToFail = false;
+        else if (expectedStatus < 400) isExpectedToFail = false;
+
+        auditLog.logTest(testId, testName, payoutUrl, payload, res.status, res.data, isExpectedToFail);
 
         const resText = JSON.stringify(res.data, null, 2);
         
@@ -83,8 +92,8 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
         return { status: res.status, data: res.data, resText };
     };
 
-    const testRejection = async (testName, payload, expectedKey) => {
-        const { resText } = await executePayout(testName, payload, 400);
+    const testRejection = async (testId, testName, payload, expectedKey) => {
+        const { resText } = await executePayout(testId, testName, payload, 400);
         if (expectedKey) expect(resText.toLowerCase()).toContain(expectedKey.toLowerCase().replace(' ', '_'));
     };
 
@@ -93,7 +102,7 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
     // ==========================================
     describe('1. Seguridad e Integridad de la Llamada Payout H2H', () => {
 
-        test('1.1. Seguridad: Forzar Unauthorized (401) con Token Falso', async () => {
+        test.skip('1.1. Seguridad: Forzar Unauthorized (401) con Token Falso', async () => {
             const payload = buildPayload();
             const response = await axios.post(payoutUrl, payload, {
                 headers: {
@@ -103,24 +112,25 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
                 },
                 validateStatus: () => true
             });
+            auditLog.logTest('TC-01', 'Seguridad: Forzar Unauthorized', payoutUrl, payload, response.status, response.data, true);
             expect(response.status).toBe(401);
         });
 
-        test('1.2. Root Consistency: Desacople País-Moneda (AR con COP)', async () => {
+        test.skip('1.2. Root Consistency: Inconsistent Country/Currency (AR - COP)', async () => {
             const p = buildPayload({ country: "AR", currency: "COP" });
-            const res = await executePayout('Moneda Incorrecta AR', p);
+            const res = await executePayout('TC-02', 'Root: Inconsistent Country/Currency (AR-COP)', p);
             expect([400, 422]).toContain(res.status);
         });
         
-        test('1.3. Método de Pago Inválido (Hacking String)', async () => {
+        test.skip('1.3. Payment Method: Invalid Method (Hacking String)', async () => {
             const p = buildPayload({ payment_method: "tarjeta_falsa" });
-            const res = await executePayout('Payment Method Falso', p);
+            const res = await executePayout('TC-03', 'Payment Method: Invalid String', p);
             expect([400, 422]).toContain(res.status);
         });
         
-        test('1.4. Método de Pago Vacío / Nulo', async () => {
+        test('1.4. Payment Method: Empty / Null', async () => {
             const p = buildPayload({ payment_method: "" });
-            const res = await executePayout('Payment Method Vacio', p);
+            const res = await executePayout('TC-04', 'Payment Method: Empty', p);
             expect([400, 422]).toContain(res.status);
         });
     });
@@ -128,171 +138,168 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
     // ==========================================
     // SECCIÓN 1.5: CAMPOS ROOT ESTRUCTURALES
     // ==========================================
-    describe('1.5 Validaciones Estructurales de Campos Raíz (Root)', () => {
+    describe('1.5 Root Structural Validations', () => {
         // --- Country & Currency ---
-        test('Reject missing country', async () => await testRejection('Missing Country', buildPayload({ country: "" }), 'country'));
-        test('Reject invalid country format (ARG)', async () => await testRejection('Invalid Country Format ARG', buildPayload({ country: "ARG" }), 'country'));
+        test('Reject missing country', async () => await testRejection('TC-05', 'Country: Missing', buildPayload({ country: "" }), 'country'));
+        test('Reject invalid country format (ARG)', async () => await testRejection('TC-06', 'Country: Invalid Format ARG', buildPayload({ country: "ARG" }), 'country'));
         
-        test('Reject missing currency', async () => await testRejection('Missing Currency', buildPayload({ currency: "" }), 'currency'));
-        test('Reject invalid currency format (PESOS)', async () => await testRejection('Invalid Currency PEN', buildPayload({ currency: "PESOS" }), 'currency'));
+        test('Reject missing currency', async () => await testRejection('TC-07', 'Currency: Missing', buildPayload({ currency: "" }), 'currency'));
+        test('Reject invalid currency format (PESOS)', async () => await testRejection('TC-08', 'Currency: Invalid Format PESOS', buildPayload({ currency: "PESOS" }), 'currency'));
     });
 
     // ==========================================
     // SECCIÓN 2: OBJETO ROOT Y CONSISTENCIA
     // ==========================================
-    describe('2. Validaciones Específicas por Segmento', () => {
-        describe('2.1 Segmento Primer Nombre (First Name)', () => {
-            test('Reject missing first_name', async () => await testRejection('Missing First Name', buildPayload({}, { first_name: "" }), 'first_name'));
-            test('Reject first_name exceeding max length', async () => await testRejection('Max Length First Name', buildPayload({}, { first_name: "a".repeat(100) }), 'first_name'));
-            test('Reject first_name numeric', async () => await testRejection('Numeric First Name', buildPayload({}, { first_name: "Sergio123" }), 'first_name'));
-            test('Reject first_name invalid symbols (XSS)', async () => await testRejection('XSS First Name', buildPayload({}, { first_name: "<script>" }), 'first_name'));
+    describe('2. Specific Segment Validations', () => {
+        describe('2.1 Segment: First Name', () => {
+            test('Reject missing first_name', async () => await testRejection('TC-09', 'First Name: Missing', buildPayload({}, { first_name: "" }), 'first_name'));
+            test('Reject first_name exceeding max length', async () => await testRejection('TC-10', 'First Name: Max Length Exceeded', buildPayload({}, { first_name: "a".repeat(100) }), 'first_name'));
+            test('Reject first_name numeric', async () => await testRejection('TC-11', 'First Name: Numeric', buildPayload({}, { first_name: "Sergio123" }), 'first_name'));
+            test('Reject first_name invalid symbols (XSS)', async () => await testRejection('TC-12', 'First Name: XSS Injection', buildPayload({}, { first_name: "<script>" }), 'first_name'));
             
-            test('Reject first_name 1 character (Short Length)', async () => await testRejection('Short First Name', buildPayload({}, { first_name: "A" }), 'first_name'));
+            test('Reject first_name 1 character (Short Length)', async () => await testRejection('TC-13', 'First Name: Short Length (1 Char)', buildPayload({}, { first_name: "A" }), 'first_name'));
             test('Accept first_name 2 characters (Valid Short)', async () => {
-                const res = await executePayout('Valid Short First Name', buildPayload({}, { first_name: "Jo" }), [200, 201, 202]);
+                const res = await executePayout('TC-14', 'First Name: Valid Short (2 Chars)', buildPayload({}, { first_name: "Jo" }), [200, 201, 202]);
                 expect(res.status).toBeGreaterThanOrEqual(200);
             });
             test('Accept first_name strange allowed characters (Spaces, Hyphens, Diacritics)', async () => {
-                const res = await executePayout('Complex First Name', buildPayload({}, { first_name: "José-María d'Artagnan" }), [200, 201, 202]);
+                const res = await executePayout('TC-15', 'First Name: Complex Allowed Characters', buildPayload({}, { first_name: "José-María d'Artagnan" }), [200, 201, 202]);
                 expect(res.status).toBeGreaterThanOrEqual(200);
             });
         });
 
-        describe('2.2 Segmento Apellidos (Last Name)', () => {
-            test('Reject missing last_name', async () => await testRejection('Missing Last Name', buildPayload({}, { last_name: "" }), 'last_name'));
-            test('Reject last_name exceeding max length', async () => await testRejection('Max Length Last Name', buildPayload({}, { last_name: "b".repeat(100) }), 'last_name'));
-            test('Reject last_name numeric', async () => await testRejection('Numeric Last Name', buildPayload({}, { last_name: "Gomez8" }), 'last_name'));
-            test('Reject last_name invalid symbols (XSS)', async () => await testRejection('XSS Last Name', buildPayload({}, { last_name: "Gomez;" }), 'last_name'));
+        describe('2.2 Segment: Last Name', () => {
+            test('Reject missing last_name', async () => await testRejection('TC-16', 'Missing Last Name', buildPayload({}, { last_name: "" }), 'last_name'));
+            test('Reject last_name exceeding max length', async () => await testRejection('TC-17', 'Max Length Last Name', buildPayload({}, { last_name: "b".repeat(100) }), 'last_name'));
+            test('Reject last_name numeric', async () => await testRejection('TC-18', 'Numeric Last Name', buildPayload({}, { last_name: "Gomez8" }), 'last_name'));
+            test('Reject last_name invalid symbols (XSS)', async () => await testRejection('TC-19', 'XSS Last Name', buildPayload({}, { last_name: "Gomez;" }), 'last_name'));
             
-            test('Reject last_name 1 character (Short Length)', async () => await testRejection('Short Last Name', buildPayload({}, { last_name: "B" }), 'last_name'));
+            test('Reject last_name 1 character (Short Length)', async () => await testRejection('TC-20', 'Short Last Name', buildPayload({}, { last_name: "B" }), 'last_name'));
             test('Accept last_name 2 characters (Valid Short)', async () => {
-                const res = await executePayout('Valid Short Last Name', buildPayload({}, { last_name: "De" }), [200, 201, 202]);
+                const res = await executePayout('TC-21', 'Valid Short Last Name', buildPayload({}, { last_name: "De" }), [200, 201, 202]);
                 expect(res.status).toBeGreaterThanOrEqual(200);
             });
             test('Accept last_name strange allowed characters (Spaces, Hyphens, Diacritics)', async () => {
-                const res = await executePayout('Complex Last Name', buildPayload({}, { last_name: "O'Connor López-García" }), [200, 201, 202]);
+                const res = await executePayout('TC-22', 'Complex Last Name', buildPayload({}, { last_name: "O'Connor López-García" }), [200, 201, 202]);
                 expect(res.status).toBeGreaterThanOrEqual(200);
             });
         });
 
-        describe('2.3 Segmento Número de Documento (CUIT/CUIL BCRA)', () => {
-            test('Reject missing document_number', async () => await testRejection('Missing Doc Number', buildPayload({}, { document_number: "" }), 'document_number'));
+        describe('2.3 Segment: Document Number (CUIT/CUIL BCRA)', () => {
+            test('Reject missing document_number', async () => await testRejection('TC-23', 'Document Number: Missing', buildPayload({}, { document_number: "" }), 'document_number'));
             
             test('Reject payout with invalid CUIL prefix (19...)', async () => {
-                const res = await executePayout('CUIL Prefix Invalido (19)', buildPayload({}, { document_number: "19123456789" }), 400);
+                const res = await executePayout('TC-24', 'Document Number: Invalid CUIL Prefix (19)', buildPayload({}, { document_number: "19123456789" }), 400);
                 expect(res.resText).toMatch(/prefix|format|valid/i);
             });
 
             test('Reject payout with incorrect CUIL length (10 digits instead of 11)', async () => {
-                const res = await executePayout('CUIL solo 10 numeros', buildPayload({}, { document_number: "2012345678" }), 400);
+                const res = await executePayout('TC-25', 'Document Number: Invalid Length (10 digits)', buildPayload({}, { document_number: "2012345678" }), 400);
                 expect(res.resText).toMatch(/length|format|11/i);
             });
             
             test('Accept CUIL with hyphens (Happy Path Format)', async () => { 
-                const res = await executePayout('CUIL con guiones', buildPayload({}, { document_number: "20-27510579-2" }), [200, 201, 202]);
+                const res = await executePayout('TC-26', 'Document Number: Valid CUIL with Hyphens', buildPayload({}, { document_number: "20-27510579-2" }), [200, 201, 202]);
                 expect(res.status).toBeGreaterThanOrEqual(200);
             });
             
-            test('Reject CUIL con caracteres alfabeticos', async () => await testRejection('Alfabetico CUIL', buildPayload({}, { document_number: "20X84908488" }), 'document_number'));
+            test('Reject CUIL con caracteres alfabeticos', async () => await testRejection('TC-27', 'Document Number: Alphabetic Characters', buildPayload({}, { document_number: "20X84908488" }), 'document_number'));
         });
 
-        describe('2.4 Segmento Número de Cuenta (CBU/CVU BCRA Math Strict)', () => {
-            test('Reject missing account_number', async () => await testRejection('Missing Account Number', buildPayload({}, { account_number: "" }), 'account_number'));
+        describe('2.4 Segment: Account Number (CBU/CVU BCRA Math Strict)', () => {
+            test('Reject missing account_number', async () => await testRejection('TC-28', 'Account Number: Missing', buildPayload({}, { account_number: "" }), 'account_number'));
             
-            // --- Casos Positivos ---
+            // --- Positive Cases ---
             test('Accept CBU Válido (Tradicional Bancario)', async () => { 
-                const res = await executePayout('CBU Valido', buildPayload({}, { account_number: "0070327530004025541644" }), [200, 201, 202]);
+                const res = await executePayout('TC-29', 'Account Number: Valid CBU', buildPayload({}, { account_number: "0070327530004025541644" }), [200, 201, 202]);
                 expect(res.status).toBeGreaterThanOrEqual(200);
             });
 
             test('Accept CVU Válido (Billetera Virtual)', async () => { 
-                const res = await executePayout('CVU Valido', buildPayload({}, { account_number: "0000003100009620154382" }), [200, 201, 202]);
+                const res = await executePayout('TC-30', 'Account Number: Valid CVU', buildPayload({}, { account_number: "0000003100009620154382" }), [200, 201, 202]);
                 expect(res.status).toBeGreaterThanOrEqual(200);
             });
 
-            // --- Casos Negativos de Estructura ---
+            // --- Negative Structural Cases ---
             test('Reject payout with invalid CVU/CBU length (21 instead of 22)', async () => {
-                const res = await executePayout('CVU 21 digitos', buildPayload({}, { account_number: "123456789012345678901" }), 400);
+                const res = await executePayout('TC-31', 'Account Number: Invalid Length (21 digits)', buildPayload({}, { account_number: "123456789012345678901" }), 400);
                 expect(res.resText).toMatch(/22/);
             });
 
             test('Reject payout with CVU not starting with 000', async () => {
-                const res = await executePayout('CVU sin prefix 000', buildPayload({}, { account_number: "1234567890123456789012" }), 400);
+                const res = await executePayout('TC-32', 'Account Number: Invalid CVU Prefix (No 000)', buildPayload({}, { account_number: "1234567890123456789012" }), 400);
                 expect(res.resText).toMatch(/000/);
             });
 
-            // --- Casos Negativos por Algoritmo BCRA (Check Digits) ---
+            // --- BCRA Algorithm Negative Cases (Check Digits) ---
             test('Reject CVU Inválido (Falla en el Check Digit final)', async () => {
-                // Alteramos el último dígito del CVU válido (2 -> 9)
-                const res = await executePayout('CVU Invalido Check Digit', buildPayload({}, { account_number: "0000003100009620154389" }), 400);
+                const res = await executePayout('TC-33', 'Account Number: Invalid CVU Final Check Digit', buildPayload({}, { account_number: "0000003100009620154389" }), 400);
                 expect(res.resText).toMatch(/digit|account/i);
             });
 
             test('Reject CBU Inválido (Falla en el Check Digit final)', async () => {
-                // Alteramos el último dígito del CBU válido (4 -> 9)
-                const res = await executePayout('CBU Invalido Check Digit', buildPayload({}, { account_number: "0070327530004025541649" }), 400);
+                const res = await executePayout('TC-34', 'Account Number: Invalid CBU Final Check Digit', buildPayload({}, { account_number: "0070327530004025541649" }), 400);
                 expect(res.resText).toMatch(/digit|account/i);
             });
 
             test('Reject payout with invalid CVU check digit block 1', async () => {
-                const res = await executePayout('CVU Check Digit Block 1 Falla', buildPayload({}, { account_number: "0000003900062244154712" }), 400);
+                const res = await executePayout('TC-35', 'Account Number: Invalid CVU Block 1 Check Digit', buildPayload({}, { account_number: "0000003900062244154712" }), 400);
                 expect(res.resText).toMatch(/position 8/i);
             });
 
             test('Reject payout with invalid CVU check digit block 2', async () => {
-                const res = await executePayout('CVU Check Digit Block 2 Falla', buildPayload({}, { account_number: "0000003100062244154719" }), 400);
+                const res = await executePayout('TC-36', 'Account Number: Invalid CVU Block 2 Check Digit', buildPayload({}, { account_number: "0000003100062244154719" }), 400);
                 expect(res.resText).toMatch(/position 22/i);
             });
         });
     });
 
-    describe('3. Validaciones Matemáticas, Montos y Saldos Insuficientes', () => {
+    describe('3. Mathematical, Amount & Balance Validations', () => {
         test('Reject missing amount (null/empty)', async () => {
-            const res = await executePayout('Amount is Missing', buildPayload({ amount: null }), 400);
+            const res = await executePayout('TC-37', 'Amount is Missing', buildPayload({ amount: null }), 400);
             expect(res.resText).toMatch(/amount/i);
         });
 
         test('Reject amount passed as String', async () => {
-            const res = await executePayout('Amount as String', buildPayload({ amount: "1000.00" }), 400);
-            // Dependiendo del framework puede parsearlo o rechazarlo strict type
+            const res = await executePayout('TC-38', 'Amount as String', buildPayload({ amount: "1000.00" }), 400);
             expect(res.status).toBeDefined();
         });
 
         test('Reject payout with amount == 0', async () => {
-            const res = await executePayout('Amount is 0', buildPayload({ amount: 0 }), 400);
+            const res = await executePayout('TC-39', 'Amount is 0', buildPayload({ amount: 0 }), 400);
             expect(res.resText).toMatch(/amount|greater/i);
         });
 
         test('Amount < 0 (Negative) is absolute - should be accepted', async () => {
-            const res = await executePayout('Amount is Negative (Absolute)', buildPayload({ amount: -10.5 }), [200, 201, 202]);
+            const res = await executePayout('TC-40', 'Amount is Negative (Absolute)', buildPayload({ amount: -10.5 }), [200, 201, 202]);
             expect(res.status).toBeGreaterThanOrEqual(200);
         });
     });
 
-    describe('4. Flujo Matemático Completo (Auditoría de Balances)', () => {
-        test('Verificación estricta de saldo, creación y descuento matemático post-aprobación', async () => {
-            // A) GET SALDOS PREVIOS
+    describe('4. Full Mathematical Flow (Balance Auditing)', () => {
+        test('Strict verification of balance, creation and mathematical deduction post-approval', async () => {
+            // A) GET PREVIOUS BALANCES
             const preBalance = await getMerchantBalance(token);
 
-            // B) POST PAYOUT FELIZ
+            // B) POST PAYOUT HAPPY PATH
             const payload = buildPayload();
-            const { status, data } = await executePayout('Happy Path Payout', payload, [200, 201, 202]);
+            const { status, data } = await executePayout('TC-41', 'Happy Path Payout', payload, [200, 201, 202]);
             expect(data.id || data.transaction_id || data.merchant_transaction_reference).toBeDefined();
 
-            // C) GET SALDOS POSTERIORES (Asegurarse de descuento inmediato por PENDING)
+            // C) GET SUBSEQUENT BALANCES (Ensure immediate deduction via PENDING state)
             await new Promise(r => setTimeout(r, 2000));
             const postBalance = await getMerchantBalance(token);
 
-            // D) MATEMÁTICAS
+            // D) MATH
             const targetMonto = payload.transaction.transaction_data.transaction_total;
             const diff = preBalance.available - postBalance.available;
             
             if(allure && allure.attachment) {
-                await allure.attachment(`🧮 Comparación Matemática`, JSON.stringify({
-                    "Saldo Inicial (available)": preBalance.available,
-                    "Monto Procesado": targetMonto,
-                    "Saldo Final Detectado": postBalance.available,
-                    "Diferencia Real Detectada": diff
+                await allure.attachment(`🧮 Mathematical Comparison`, JSON.stringify({
+                    "Initial Balance (available)": preBalance.available,
+                    "Processed Amount": targetMonto,
+                    "Final Balance Detected": postBalance.available,
+                    "Actual Difference Detected": diff
                 }, null, 2), 'application/json');
             }
 

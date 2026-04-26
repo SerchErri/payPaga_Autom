@@ -4,6 +4,7 @@ const { chromium } = require('playwright');
 const { getAccessToken } = require('../../../../../utils/authHelper');
 const envConfig = require('../../../../../utils/envConfig');
 const { loginAndCaptureDashboard, fastAdminAction } = require('../../../../../utils/uiBalanceHelper');
+const AuditLogger = require('../../../../../utils/auditLogger');
 
 jest.setTimeout(1800000); // 30 mins para UI operations
 
@@ -15,6 +16,16 @@ describe(`[E2E Híbrido] V1 Pay-In H2H Dinaria (AR): API Generación + UI Valida
     let page;
     let initialBalances = {};
     let payinAmountConfig = 15.55; // Monto pequeño para evadir límites diarios de validación
+    let auditLog;
+
+    const filterBalance = (bal) => {
+        return {
+            general: bal.general,
+            available: bal.available,
+            fees: bal.fees,
+            taxes: bal.taxes
+        };
+    };
 
     beforeAll(async () => {
         token = await getAccessToken();
@@ -24,6 +35,7 @@ describe(`[E2E Híbrido] V1 Pay-In H2H Dinaria (AR): API Generación + UI Valida
             page = await context.newPage();
             page.setDefaultTimeout(20000);
         } catch (e) { console.error("Fallo levantando Playwright", e); }
+        auditLog = new AuditLogger('V1_Payin_H2H_Flow_Dinaria_AR');
     });
 
     afterAll(async () => {
@@ -209,8 +221,21 @@ Taxes                | ${Math.abs(initialBalances.taxes).toFixed(2).padEnd(8)} |
 
         console.log(mathReport);
 
+        const flowData = {
+            "1. Initial Balance (Before Payin)": filterBalance(initialBalances),
+            "2. Amount To Pay (Requested)": amountToPay,
+            "3. Impact Details": {
+                "operation_difference": opDiff,
+                "fees_deducted": feeDiff,
+                "taxes_deducted": taxDiff,
+                "net_value_applied": netValue
+            },
+            "4. Final Balance (After Admin Approval)": filterBalance(finalBalances)
+        };
+        auditLog.logFlow('TC-01', 'Omnichannel Payin H2H Flow', flowData);
+
         if (allure && allure.attachment) {
-            await allure.attachment(`Comparativa PayIn AR Dinaria H2H`, JSON.stringify({ SALDOS_INICIALES: initialBalances, SALDOS_FINALES: finalBalances }, null, 2), "application/json");
+            await allure.attachment(`Comparativa PayIn AR Dinaria H2H`, JSON.stringify(flowData, null, 2), "application/json");
             await allure.attachment(`Cálculos Matemáticos Resultantes`, mathReport, "text/plain");
         }
     });
