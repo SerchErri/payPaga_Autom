@@ -56,22 +56,24 @@ class AuditLogger {
         logEntry += `[ENDPOINT]: ${endpoint}\n`;
         logEntry += `[Request]:\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`\n`;
         
+        const txid = overrideTxId || responseData?.transaction_id || responseData?.details?.transaction_processed?.transaction_id || responseData?.id || "N/A";
+        
         if (status >= 200 && status < 300) {
             // ACCEPTED
-            const txid = overrideTxId || responseData?.transaction_id || responseData?.details?.transaction_processed?.transaction_id || responseData?.id || "N/A";
-            logEntry += `....................................................\n`;
-            logEntry += `[ACTUAL_RESULT]: ACCEPTED (HTTP ${status})\n`;
+            logEntry += `\n[ACTUAL_RESULT]: ACCEPTED (HTTP ${status})\n`;
             logEntry += `[TX_ID]: ${txid}\n`;
-            logEntry += `....................................................\n`;
             logEntry += `\n[Response]:\n\`\`\`json\n${JSON.stringify(responseData, null, 2)}\n\`\`\`\n`;
         } else {
             // REJECTED
             const errorMsg = JSON.stringify(responseData?.error || responseData?.error_details || responseData, null, 2);
-            logEntry += `....................................................\n`;
-            logEntry += `[ACTUAL_RESULT]: BLOCKED/REJECTED (HTTP ${status})\n`;
-            logEntry += `....................................................\n`;
+            logEntry += `\n[ACTUAL_RESULT]: BLOCKED/REJECTED (HTTP ${status})\n`;
+            logEntry += `[TX_ID]: ${txid}\n`;
             logEntry += `\n[Response]:\n\`\`\`json\n${errorMsg}\n\`\`\`\n`;
         }
+
+        logEntry += `--------------------------------------------------\n`;
+        const voucherLink = responseData?.pay_url || responseData?.url || responseData?.redirect_url || `https://api.v2.dev.paypaga.com/pay/${txid}`;
+        logEntry += `VOUCHER VIEW LINK:\n${voucherLink}\n`;
         logEntry += `--------------------------------------------------\n`;
         
         fs.appendFileSync(this.filePath, logEntry);

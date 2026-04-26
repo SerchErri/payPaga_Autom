@@ -4,6 +4,7 @@ const allure = require('allure-js-commons');
 const { chromium } = require('playwright');
 const envConfig = require('../../../../../utils/envConfig');
 const { getAccessToken } = require('../../../../../utils/authHelper');
+const AuditLogger = require('../../../../../utils/auditLogger');
 
 const PAYURL_ENDPOINT = `${envConfig.BASE_URL}/payurl`;
 
@@ -15,8 +16,10 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
     let browser;
     let context;
     let page;
+    let auditLog;
 
     beforeAll(async () => {
+        auditLog = new AuditLogger('V1_PayUrl_API_Val_AR');
         try { freshToken = await getAccessToken(); } catch (error) { console.error("Fallo obteniendo token global", error); }
         try {
             browser = await chromium.launch({ headless: true });
@@ -58,6 +61,8 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
     };
 
     const executePayUrlPost = async (testName, payload, rawStringMode = false) => {
+        auditLog.logTestStart(`[TEST] ${testName}`);
+        
         const config = {
             headers: {
                 'DisablePartnerMock': 'true',
@@ -68,6 +73,9 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
         };
 
         const postRes = await axios.post(PAYURL_ENDPOINT, payload, config);
+        
+        const txId = postRes.data ? (postRes.data.transaction_id || postRes.data.id) : null;
+        auditLog.logTest('API-V1-PAYURL-VAL', 'Negative / Boundary POST Execution', PAYURL_ENDPOINT, rawStringMode ? payload : JSON.stringify(payload), postRes.status, postRes.data, false, txId);
         
         if (allure && allure.attachment) {
             await allure.attachment(`Causa/Payload (Mandar al crear Link) - ${testName}`, rawStringMode ? payload : JSON.stringify(payload, null, 2), "application/json");
@@ -100,6 +108,19 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
                 const uiSnap = await page.screenshot({ fullPage: true }).catch(() => null);
                 if (uiSnap) await allure.attachment(`📸 Evidencia UI: ${testName}`, uiSnap, "image/png");
             }
+            
+            // Log it in the Audit Logger to prove the Frontend Validation intercepted it
+            if (pageContent) {
+                const shortContent = pageContent.replace(/\s+/g, ' ').trim();
+                const matchedError = shortContent.match(/El monto debe ser mayor que cero\.|is required|input does not match|length must be at most|al menos 2|invalid|does not exist/i) || ["(Voucher Generado Ok)"];
+                auditLog.logFlow('UI Frontend Intercept Validation', { 
+                    Context: testName, 
+                    Action: 'Checkout Visited', 
+                    Result: matchedError[0],
+                    "[Voucher_View_Link]": checkoutUrl
+                });
+            }
+
         } catch(e) {}
         return pageContent;
     };
@@ -108,16 +129,20 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
     // BLOQUE 1: SEGURIDAD, MASIFICACIÓN Y AUTENTICACIÓN API
     // ==========================================
     describe('1. Seguridad e Integridad de la Llamada PayUrl', () => {
-        test('1.1. Seguridad: Token Falso Rechazado (401)', async () => {
+        test('Seguridad: Token Falso Rechazado (401)', async () => {
             const p = generateBasePayload();
+            
+            auditLog.logTestStart(`[TEST] Seguridad: Token Falso Rechazado`);
             const response = await axios.post(PAYURL_ENDPOINT, p, {
                 headers: { 'DisablePartnerMock': 'true', 'Content-Type': 'application/json', 'Authorization': `Bearer eyR.FAKE.TOKEN` },
                 validateStatus: () => true
             });
+            auditLog.logTest('API-V1-PAYURL-VAL', 'Negative / Boundary POST Execution', PAYURL_ENDPOINT, JSON.stringify(p), response.status, response.data, false, null);
+            
             expect(response.status).toBe(401);
         });
 
-        test('1.2. Integridad JSON: Bad Request (400) por string roto', async () => {
+        test('TC02 - Integridad JSON: Bad Request (400) por string roto', async () => {
             const malformedPayload = `{ "country_code": "AR", "currency": "ARS", "transaction_total": 100 `;
             const response = await executePayUrlPost('JSON Malformado', malformedPayload, true);
             expect([400, 422]).toContain(response.status);
@@ -129,9 +154,9 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
     // ==========================================
     describe('2. Root y Consistency (Amount Test Combinados)', () => {
 
-        test('2.1. Amount: Límite Mínimo (Valor 0) - Validación UI (TC01)', async () => {
+        test('TC01 - Amount: Límite Mínimo (Valor 0) - Validación UI', async () => {
             const p = generateBasePayload(); p.transaction_total = 0;
-            const res = await executePayUrlPost('Amount 0', p);
+            const res = await executePayUrlPost('TC01 - Amount 0', p);
             expect([200, 201]).toContain(res.status);
             
             const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
@@ -147,45 +172,45 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
             }
         });
 
-        test('2.1.1. TC02 Amount: Negative Amount Absolute Value Logic', async () => {
+        test('TC02 - Amount: Negative Amount Absolute Value Logic', async () => {
             const p = generateBasePayload(); p.transaction_total = -1500.00;
-            const res = await executePayUrlPost('Negative Amount', p);
+            const res = await executePayUrlPost('TC02 - Negative Amount', p);
             let content = JSON.stringify(res.data);
             if (res.status === 200 || res.status === 201) {
                 const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
-                content = await visitCheckoutAndForceValidation('Negative Amount', checkoutUrl);
+                content = await visitCheckoutAndForceValidation('TC02 - Negative Amount', checkoutUrl);
             }
             const fueFrenado = /mayor que|greater than|invalid|incorrect|positive|not supported/i.test(content) || (!content.includes('1500.00') && !content.includes('Referencia de Pago'));
             expect(fueFrenado).toBe(true);
         });
 
-        test('2.1.2. TC04 Amount: Null Amount Validation', async () => {
+        test('TC03 - Amount: Null Amount Validation', async () => {
             const p = generateBasePayload(); p.transaction_total = null;
-            const res = await executePayUrlPost('Null Amount', p);
+            const res = await executePayUrlPost('TC03 - Null Amount', p);
             let content = JSON.stringify(res.data);
             if (res.status === 200 || res.status === 201) {
                 const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
-                content = await visitCheckoutAndForceValidation('Null Amount', checkoutUrl);
+                content = await visitCheckoutAndForceValidation('TC03 - Null Amount', checkoutUrl);
             }
             const fueFrenado = /monto|amount|requerido|required|invalid|transaction_total/i.test(content);
             expect(fueFrenado).toBe(true);
         });
 
-        test('2.1.3. TC05 Currency: Unsupported Currency Validation', async () => {
+        test('TC04 - Currency: Unsupported Currency Validation', async () => {
             const p = generateBasePayload(); p.currency = "USD";
-            const res = await executePayUrlPost('Unsupported Currency', p);
+            const res = await executePayUrlPost('TC04 - Unsupported Currency', p);
             let content = JSON.stringify(res.data);
             if (res.status === 200 || res.status === 201) {
                 const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
-                content = await visitCheckoutAndForceValidation('Unsupported Currency', checkoutUrl);
+                content = await visitCheckoutAndForceValidation('TC04 - Unsupported Currency', checkoutUrl);
             }
             const fueFrenado = /currency|moneda|soport|support|invalid|required/i.test(content);
             expect(fueFrenado).toBe(true);
         });
 
-        test('2.2. Amount: Validar importe puntual de 1.00 (Voucher Generado Ok)', async () => {
+        test('TC05 - Amount: Validar importe puntual de 1.00 (Voucher Generado Ok)', async () => {
             const p = generateBasePayload(); p.transaction_total = 1.00;
-            const res = await executePayUrlPost('Amount 1.00', p);
+            const res = await executePayUrlPost('TC05 - Amount 1.00', p);
             expect([200, 201]).toContain(res.status);
 
             const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
@@ -211,9 +236,9 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
             }
         });
 
-        test('2.3. Amount: Validar importe puntual de 10.21 (Voucher Generado Ok)', async () => {
+        test('TC06 - Amount: Validar importe puntual de 10.21 (Voucher Generado Ok)', async () => {
             const p = generateBasePayload(); p.transaction_total = 10.21;
-            const res = await executePayUrlPost('Amount 10.21', p);
+            const res = await executePayUrlPost('TC06 - Amount 10.21', p);
             expect([200, 201]).toContain(res.status);
 
             const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
@@ -239,9 +264,9 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
             }
         });
 
-        test('2.4. Amount: Exceso de 3 Decimales (10.005) - Falla en Backend 400', async () => {
+        test('TC07 - Amount: Exceso de 3 Decimales (10.005) - Falla en Backend 400', async () => {
             const p = generateBasePayload(); p.transaction_total = 10.005;
-            const res = await executePayUrlPost('Amount 3 Decimales', p);
+            const res = await executePayUrlPost('TC07 - Amount 3 Decimales', p);
             
             expect([400, 422]).toContain(res.status);
             const errorMsg = JSON.stringify(res.data).toLowerCase();
@@ -288,140 +313,140 @@ describe(`[PayURL Dinaria AR] V1 Validación Backend Estricta y UI [Ambiente: ${
         };
 
         // --- FIRST NAME ---
-        test('3.1. First Name: Nulo', async () => {
-            const content = await runFirstNameTest('First Name Nulo', null);
+        test('TC08 - First Name: Nulo', async () => {
+            const content = await runFirstNameTest('TC08 - First Name Nulo', null);
             expect(content).toContain('is required');
         });
-        test('3.2. First Name: Vacío', async () => {
-            const content = await runFirstNameTest('First Name Vacio', "");
+        test('TC09 - First Name: Vacío', async () => {
+            const content = await runFirstNameTest('TC09 - First Name Vacio', "");
             expect(content).toContain('is required');
         });
-        test('3.3. First Name: Incluye Números', async () => {
-            const content = await runFirstNameTest('First Name Números', "Sergio123");
+        test('TC10 - First Name: Incluye Números', async () => {
+            const content = await runFirstNameTest('TC10 - First Name Números', "Sergio123");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.4. First Name: XSS HTML', async () => {
-            const content = await runFirstNameTest('First Name HTML Injection', "<script>alert(1)</script> Sergio");
+        test('TC11 - First Name: XSS HTML', async () => {
+            const content = await runFirstNameTest('TC11 - First Name HTML Injection', "<script>alert(1)</script> Sergio");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.5. First Name: Límite Estricto (51 Chars) (TC12)', async () => {
-            const content = await runFirstNameTest('First Name Límite 51', "A".repeat(51));
+        test('TC12 - First Name: Límite Estricto (51 Chars)', async () => {
+            const content = await runFirstNameTest('TC12 - First Name Límite 51', "A".repeat(51));
             expect(content).toContain('length must be at most 50 characters');
         });
-        test('3.5.1. First Name: Whitespace Only (TC08)', async () => {
-            const content = await runFirstNameTest('First Name Solo Espacios', "     ");
+        test('TC13 - First Name: Whitespace Only', async () => {
+            const content = await runFirstNameTest('TC13 - First Name Solo Espacios', "     ");
             expect(content).toMatch(/required|format|invalid/i);
         });
-        test('3.5.2. First Name: Special Characters (TC10)', async () => {
-            const content = await runFirstNameTest('First Name Especiales', "Jon@Snow#");
+        test('TC14 - First Name: Special Characters', async () => {
+            const content = await runFirstNameTest('TC14 - First Name Especiales', "Jon@Snow#");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.5.3. First Name: Single Character (TC11)', async () => {
-            const content = await runFirstNameTest('First Name 1 Letra', "A");
+        test('TC15 - First Name: Single Character', async () => {
+            const content = await runFirstNameTest('TC15 - First Name 1 Letra', "A");
             const esErrorString = /least 2|al menos 2|format|formato|requerid|invalid/i.test(content);
             expect(esErrorString).toBe(true);
         });
-        test('3.5.4. First Name: Exact 50 Characters (TC13)', async () => {
-            const content = await runFirstNameTest('First Name 50 Chars Feliz', "A".repeat(50));
+        test('TC16 - First Name: Exact 50 Characters', async () => {
+            const content = await runFirstNameTest('TC16 - First Name 50 Chars Feliz', "A".repeat(50));
             expect(content).toMatch(/Referencia de Pago/i);
         });
 
         // --- LAST NAME ---
-        test('3.6. Last Name: Nulo', async () => {
-            const content = await runLastNameTest('Last Name Nulo', null);
+        test('TC17 - Last Name: Nulo', async () => {
+            const content = await runLastNameTest('TC17 - Last Name Nulo', null);
             expect(content).toContain('is required');
         });
-        test('3.7. Last Name: Vacío', async () => {
-            const content = await runLastNameTest('Last Name Vacio', "");
+        test('TC18 - Last Name: Vacío', async () => {
+            const content = await runLastNameTest('TC18 - Last Name Vacio', "");
             expect(content).toContain('is required');
         });
-        test('3.8. Last Name: Incluye Números', async () => {
-            const content = await runLastNameTest('Last Name Numeros', "Gomez123");
+        test('TC19 - Last Name: Incluye Números', async () => {
+            const content = await runLastNameTest('TC19 - Last Name Numeros', "Gomez123");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.9. Last Name: XSS HTML', async () => {
-            const content = await runLastNameTest('Last Name HTML Injection', "<script>alert(2)</script> Gomez");
+        test('TC20 - Last Name: XSS HTML', async () => {
+            const content = await runLastNameTest('TC20 - Last Name HTML Injection', "<script>alert(2)</script> Gomez");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.10. Last Name: Boundary 51 Chars (TC20)', async () => {
-            const content = await runLastNameTest('Last Name Límite 51', "A".repeat(51));
+        test('TC21 - Last Name: Boundary 51 Chars', async () => {
+            const content = await runLastNameTest('TC21 - Last Name Límite 51', "A".repeat(51));
             expect(content).toContain('length must be at most 50 characters');
         });
-        test('3.10.1. Last Name: Whitespace Only (TC16)', async () => {
-            const content = await runLastNameTest('Last Name Solo Espacios', "     ");
+        test('TC22 - Last Name: Whitespace Only', async () => {
+            const content = await runLastNameTest('TC22 - Last Name Solo Espacios', "     ");
             expect(content).toMatch(/required|format|invalid/i);
         });
-        test('3.10.2. Last Name: Special Characters (TC18)', async () => {
-            const content = await runLastNameTest('Last Name Especiales', "Gomez%_!");
+        test('TC23 - Last Name: Special Characters', async () => {
+            const content = await runLastNameTest('TC23 - Last Name Especiales', "Gomez%_!");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.10.3. Last Name: Single Character (TC19)', async () => {
-            const content = await runLastNameTest('Last Name 1 Letra', "G");
+        test('TC24 - Last Name: Single Character', async () => {
+            const content = await runLastNameTest('TC24 - Last Name 1 Letra', "G");
             const esErrorString = /least 2|al menos 2|format|formato|requerid|invalid/i.test(content);
             expect(esErrorString).toBe(true);
         });
-        test('3.10.4. Last Name: Exact 50 Characters (TC21)', async () => {
-            const content = await runLastNameTest('Last Name 50 Chars Feliz', "B".repeat(50));
+        test('TC25 - Last Name: Exact 50 Characters', async () => {
+            const content = await runLastNameTest('TC25 - Last Name 50 Chars Feliz', "B".repeat(50));
             expect(content).toMatch(/Referencia de Pago/i);
         });
 
         // --- DOCUMENT (CUIL AR) ---
-        test('3.11. CUIL Inválido: Prefix Invalido (19...)', async () => {
-            const content = await runDocTest('CUIL Prefix 19', "19123456789");
+        test('TC26 - CUIL Inválido: Prefix Invalido (19...)', async () => {
+            const content = await runDocTest('TC26 - CUIL Prefix 19', "19123456789");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.12. CUIL Inválido: Corto (10 digitos)', async () => {
-            const content = await runDocTest('CUIL Corto 10', "2012345678");
+        test('TC27 - CUIL Inválido: Corto (10 digitos)', async () => {
+            const content = await runDocTest('TC27 - CUIL Corto 10', "2012345678");
             expect(content).toContain('input does not match the required format');
         });
         
-        test('3.13. CUIL Válido sin guiones (Voucher Exitoso) (TC25)', async () => {
-            const content = await runDocTest('CUIL sin guiones Válido', "20084908488");
+        test('TC28 - CUIL Válido sin guiones (Voucher Exitoso)', async () => {
+            const content = await runDocTest('TC28 - CUIL sin guiones Válido', "20084908488");
             expect(content).toMatch(/Referencia de Pago/i);
             expect(content).toMatch(/CVU|CBU/i);
         });
 
-        test('3.13.1. CUIL Válido CON guiones (Voucher Exitoso) (TC24)', async () => {
-            const content = await runDocTest('CUIL con guiones', "20-08490848-8");
+        test('TC29 - CUIL Válido CON guiones (Voucher Exitoso)', async () => {
+            const content = await runDocTest('TC29 - CUIL con guiones', "20-08490848-8");
             expect(content).toMatch(/Referencia de Pago/i);
             expect(content).toMatch(/CVU|CBU/i);
         });
 
-        test('3.14. CUIL Inválido: Caracteres Especiales (TC26)', async () => {
-            const content = await runDocTest('CUIL Especiales', "20-08490848-$");
+        test('TC30 - CUIL Inválido: Caracteres Especiales', async () => {
+            const content = await runDocTest('TC30 - CUIL Especiales', "20-08490848-$");
             expect(content).toContain('input does not match the required format');
         });
-        test('3.15. CUIL Inválido: Dígito Verificador Roto', async () => {
-            const content = await runDocTest('CUIL Digito Roto', "20-08490848-9");
+        test('TC31 - CUIL Inválido: Dígito Verificador Roto', async () => {
+            const content = await runDocTest('TC31 - CUIL Digito Roto', "20-08490848-9");
             expect(content).toContain('invalid cuil/cuit');
         });
-        test('3.16. CUIL Inválido: Puntos (TC28)', async () => {
-            const content = await runDocTest('CUIL Puntos', "20.08490848.8");
+        test('TC32 - CUIL Inválido: Puntos', async () => {
+            const content = await runDocTest('TC32 - CUIL Puntos', "20.08490848.8");
             expect(content).toContain('input does not match the required format');
         });
 
         // --- PAYMENT METHODS ---
-        test('3.17. Payment Method: Empty (TC29)', async () => {
+        test('TC33 - Payment Method: Empty', async () => {
             const p = generateBasePayload();
             p.payment_method_data[0].payment_method_code = ""; 
-            const res = await executePayUrlPost('Empty Pay Method', p);
+            const res = await executePayUrlPost('TC33 - Empty Pay Method', p);
             let content = JSON.stringify(res.data);
             if (res.status === 200 || res.status === 201) {
                 const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
-                content = await visitCheckoutAndForceValidation('Empty Pay Method', checkoutUrl);
+                content = await visitCheckoutAndForceValidation('TC33 - Empty Pay Method', checkoutUrl);
             }
             const esErrorString = /method|método|requerido|required|invalid|soporta|VALIDATION_ERROR/i.test(content);
             expect(esErrorString).toBe(true);
         });
-        test('3.18. Payment Method: Incorrect (TC30)', async () => {
+        test('TC34 - Payment Method: Incorrect', async () => {
             const p = generateBasePayload();
             p.payment_method_data[0].payment_method_code = "crypto_bitcoin"; 
             p.payment_method_codes = ["crypto_bitcoin"];
-            const res = await executePayUrlPost('Incorrect Pay Method', p);
+            const res = await executePayUrlPost('TC34 - Incorrect Pay Method', p);
             let content = JSON.stringify(res.data);
             if (res.status === 200 || res.status === 201) {
                 const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
-                content = await visitCheckoutAndForceValidation('Incorrect Pay Method', checkoutUrl);
+                content = await visitCheckoutAndForceValidation('TC34 - Incorrect Pay Method', checkoutUrl);
             }
             const esErrorString = /method|método|requerido|required|invalid|soporta|VALIDATION_ERROR|does not exist/i.test(content);
             expect(esErrorString).toBe(true);

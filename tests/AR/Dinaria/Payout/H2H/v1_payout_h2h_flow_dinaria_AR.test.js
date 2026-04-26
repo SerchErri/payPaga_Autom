@@ -112,7 +112,7 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
         }
     };
 
-    const originarPayoutH2H = async (monto, refTag) => {
+    const originarPayoutH2H = async (testId, testName, monto, refTag) => {
         const payoutUrl = `${envConfig.BASE_URL}/v1/payout`;
         const payload = {
             "country_code": "AR",
@@ -137,11 +137,9 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
             validateStatus: () => true
         });
 
+        auditLog.logTest(testId, testName, payoutUrl, payload, res.status, res.data, false);
+
         const txId = res.data.transaction_id || res.data.id || (res.data.details && res.data.details.transaction_processed && res.data.details.transaction_processed.transaction_id);
-        if (allure && allure.attachment) {
-            await allure.attachment(`Payload Solicitud Payout H2H`, JSON.stringify(payload, null, 2), "application/json");
-            await allure.attachment(`Payout H2H Emitido (ID: ${txId})`, JSON.stringify(res.data, null, 2), "application/json");
-        }
         return txId;
     };
 
@@ -251,7 +249,7 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
             console.warn(`⚠️ ALERTA: Tienes ${initialBalances.available} disponibles. Probablemente falle la API por falta de fondos.`);
         }
         // B) EJECUTAR PAYOUT HTTP POST
-        const generatedTxId = await originarPayoutH2H(payoutAmount, 'APPROVE');
+        const generatedTxId = await originarPayoutH2H('TC01', 'Happy Path Payout H2H', payoutAmount, 'APPROVE');
         expect(generatedTxId).not.toBeNull();
 
         // Damos tiempo al procesador backend para asentar el Payout y congelar el saldo
@@ -304,11 +302,7 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
             "3. Final Balance (After Approval)": filterBalance(finalBalances),
             "Payout Amount Processed": payoutAmount
         };
-        auditLog.logFlow('TC-01', 'Happy Path: UI Balances -> API Payout H2H -> Approve', flowData);
-
-        if (allure && allure.attachment) {
-            await allure.attachment(`Payout Audit and Calculation (Approve)`, JSON.stringify(flowData, null, 2), "application/json");
-        }
+        auditLog.logFlow('TC01', 'Happy Path: UI Balances -> API Payout H2H -> Approve', flowData);
     });
 
     test('2. Flujo Reverso H2H por FAILED: Generación API -> PENDING -> Dropdown Merchant (Failed) -> Reembolso', async () => {
@@ -320,7 +314,7 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
         });
 
         await allure.step("2. Emitir Payout H2H por API", async () => {
-            myTx = await originarPayoutH2H(revertMonto, 'REVERSO_FAILED');
+            myTx = await originarPayoutH2H('TC02', 'Reversal Payout H2H', revertMonto, 'REVERSO_FAILED');
             expect(myTx).not.toBeNull();
             
             // Damos tiempo al procesador backend para asentar el Payout y congelar el saldo
@@ -350,11 +344,7 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
                 "Payout Amount Attempted": revertMonto,
                 "Is Refund Successful? (Initial == Final)": initRevertBal.available === finalRevertBal.available
             };
-            auditLog.logFlow('TC-02', 'H2H Reversal (FAILED)', flowData);
-
-            if (allure && allure.attachment) {
-                await allure.attachment(`Payout Audit and Calculation (Failed)`, JSON.stringify(flowData, null, 2), "application/json");
-            }
+            auditLog.logFlow('TC02', 'H2H Reversal (FAILED)', flowData);
         });
     });
 
@@ -391,10 +381,7 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
                 validateStatus: () => true
             });
 
-            if (allure && allure.attachment) {
-                await allure.attachment(`Payload Enviado (INSUF FUNDS)`, JSON.stringify(payload, null, 2), "application/json");
-                await allure.attachment(`Payout H2H Emitido (ID: N/A - INSUF FUNDS)`, JSON.stringify(res.data, null, 2), "application/json");
-            }
+            auditLog.logTest('TC03', 'Negative H2H: Insufficient Funds POST', payoutUrl, payload, res.status, res.data, true);
         });
 
         await allure.step("3. Verificar que la API rechaza o procesa como fallido (Asíncrono 202 o HTTP 4xx)", async () => {
@@ -447,11 +434,7 @@ describe(`[E2E Híbrido] V1 Payout H2H Argentina: API Generación + UI Validacio
                 "3. Final Balance (Unchanged)": filterBalance(finalInsfBal),
                 "Is Balance Protected? (Initial == Final)": initInsfBal.available === finalInsfBal.available
             };
-            auditLog.logFlow('TC-03', 'Negative H2H: Insufficient Funds', flowData);
-
-            if (allure && allure.attachment) {
-                await allure.attachment(`Payout Audit and Calculation (Insufficient Funds)`, JSON.stringify(flowData, null, 2), "application/json");
-            }
+            auditLog.logFlow('TC03', 'Negative H2H: Insufficient Funds', flowData);
         });
     });
 

@@ -73,16 +73,6 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
         auditLog.logTest(testId, testName, payoutUrl, payload, res.status, res.data, isExpectedToFail);
 
         const resText = JSON.stringify(res.data, null, 2);
-        
-        console.log(`\n=== 🚨 FALLA PROVOCADA PARA: ${testName} ===`);
-        console.log(`Status devuelto por backend: ${res.status}`);
-        console.log(`Respuesta:`, res.data);
-        console.log(`===============================================`);
-
-        if (allure && allure.attachment) {
-            await allure.attachment(`Causa/Payload - ${testName}`, JSON.stringify(payload, null, 2), 'application/json');
-            await allure.attachment(`Efecto/Respuesta - ${testName} [HTTP ${res.status}]`, resText, 'application/json');
-        }
 
         if (Array.isArray(expectedStatus)) {
             expect(expectedStatus).toContain(res.status);
@@ -112,7 +102,7 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
                 },
                 validateStatus: () => true
             });
-            auditLog.logTest('TC-01', 'Seguridad: Forzar Unauthorized', payoutUrl, payload, response.status, response.data, true);
+            auditLog.logTest('Seguridad', 'Seguridad: Token Falso Rechazado', payoutUrl, payload, response.status, response.data, true);
             expect(response.status).toBe(401);
         });
 
@@ -284,7 +274,8 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
             // B) POST PAYOUT HAPPY PATH
             const payload = buildPayload();
             const { status, data } = await executePayout('TC-41', 'Happy Path Payout', payload, [200, 201, 202]);
-            expect(data.id || data.transaction_id || data.merchant_transaction_reference).toBeDefined();
+            const txId = data.id || data.transaction_id || data.merchant_transaction_reference || (data.details && data.details.transaction_processed && data.details.transaction_processed.transaction_id);
+            expect(txId).toBeDefined();
 
             // C) GET SUBSEQUENT BALANCES (Ensure immediate deduction via PENDING state)
             await new Promise(r => setTimeout(r, 2000));
