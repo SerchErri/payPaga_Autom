@@ -1,0 +1,80 @@
+{
+	"info": {
+		"_postman_id": "a9af0d43-9607-4606-9569-e1672fedac1c",
+		"name": "Paypaga - V1 EC Payout Bank Transfer",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Execute V1 Payout Ecuador",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"// 1. FUNCIONES GENERADORAS",
+							"const genRef = () => 'H2H-EC-' + Math.random().toString(36).substring(2, 11).toUpperCase();",
+							"const genAmt = () => parseFloat((Math.floor(Math.random() * 900) + 100) + \".\" + (Math.floor(Math.random() * 90) + 10));",
+							"",
+							"const amount = genAmt();",
+							"const correlation = genRef();",
+							"",
+							"// Guardamos datos en la colección para el Body",
+							"pm.variables.set(\"Amount\", amount);",
+							"pm.variables.set(\"CorrelationTransactionIdentifier\", correlation);",
+							"",
+							"// 2. CREDENCIALES (Reemplaza con tus valores si no usas variables de entorno)",
+							"const cid = pm.variables.get('ClientAuthorisationIdentifier') || \"4e9ac30a-edda-4806-a0cf-b648eadc5399\";",
+							"const sec = pm.variables.get('ClientSecret') || \"qZnq5X-qtbzQIhD97fzyujXw74sw-hgs\";",
+							"const authUrl = pm.variables.get('AuthorisationAddress') || \"https://api.v2.dev.paypaga.com/oauth2/token\";",
+							"",
+							"// 3. FLUJO: OBTENER TOKEN (No hay paso intermedio de Configuración en Payout)",
+							"pm.sendRequest({",
+							"    url: authUrl,",
+							"    method: 'POST',",
+							"    header: { 'Content-Type': 'application/x-www-form-urlencoded' },",
+							"    body: {",
+							"        mode: 'urlencoded',",
+							"        urlencoded: [",
+							"            { key: \"client_id\", value: cid },",
+							"            { key: \"grant_type\", value: \"client_credentials\" },",
+							"            { key: \"client_secret\", value: sec }",
+							"        ]",
+							"    }",
+							"}, (err, res) => {",
+							"    if (!err && res.code === 200) {",
+							"        pm.variables.set(\"AccessToken\", res.json().access_token);",
+							"        console.log(\"✅ Token de Payout Generado\");",
+							"    }",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{ "key": "Content-Type", "value": "application/json", "type": "text" },
+					{ "key": "DisablePartnerMock", "value": "true", "type": "text" },
+					{ "key": "Authorization", "value": "Bearer {{AccessToken}}", "type": "text" }
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"country_code\": \"EC\",\r\n    \"currency\": \"USD\",\r\n    \"payment_method_code\": \"bank_transfer\",\r\n    \"transaction\": {\r\n        \"beneficiary\": {\r\n            \"first_name\": \"Sergio\",\r\n            \"last_name\": \"Errigo\",\r\n            \"document_type\": \"CI\",\r\n            \"document_number\": \"1710034065\",\r\n            \"account_type\": \"ahorro\",\r\n            \"account_number\": \"2201234567\",\r\n            \"bank_code\": \"banco_pichincha\"\r\n        },\r\n        \"transaction_data\": {\r\n            \"transaction_total\": {{Amount}},\r\n            \"merchant_transaction_reference\": \"{{CorrelationTransactionIdentifier}}\"\r\n        }\r\n    }\r\n}"
+				},
+				"url": {
+					"raw": "https://api.v2.dev.paypaga.com/v1/payout",
+					"protocol": "https",
+					"host": [ "api", "v2", "dev", "paypaga", "com" ],
+					"path": [ "v1", "payout" ]
+				}
+			}
+		}
+	],
+	"variable": [
+		{ "key": "AuthorisationAddress", "value": "https://api.v2.dev.paypaga.com/oauth2/token" },
+		{ "key": "ClientAuthorisationIdentifier", "value": "4e9ac30a-edda-4806-a0cf-b648eadc5399" },
+		{ "key": "ClientSecret", "value": "qZnq5X-qtbzQIhD97fzyujXw74sw-hgs" }
+	]
+}

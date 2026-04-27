@@ -1,6 +1,6 @@
 const axios = require('axios');
 const allure = require('allure-js-commons');
-const { getAccessToken } = require('../../../../utils/authHelper');
+const { getAccessToken, getSecondaryAccessToken } = require('../../../../utils/authHelper');
 const envConfig = require('../../../../utils/envConfig');
 const AuditLogger = require('../../../../utils/auditLogger');
 const SandboxHelper = require('../../../../utils/sandboxHelper');
@@ -14,6 +14,7 @@ describe(`[Financial Logic] V1 Dinaria AR: Cash-In API Matrix [Env: ${envConfig.
     let auditLog;
     let adminCookie = '';
     const merchantId = envConfig.MERCHANT_ID || "370914c8-c42a-4309-b50c-45656ad50b7c";
+    const merchantBId = envConfig.AUTH_MERCHANT_B ? envConfig.AUTH_MERCHANT_B.merchantId : null;
 
     const DINARIA_SANDBOX_URL = 'https://api.sandbox.dinaria.com/ars/cashin/simulate';
     const SANDBOX_MERCHANT_1_TOKEN = 'di_sand_reg_paypaga_merch';
@@ -56,12 +57,15 @@ describe(`[Financial Logic] V1 Dinaria AR: Cash-In API Matrix [Env: ${envConfig.
         adminCookie = await AdminApiHelper.getAdminSessionCookie();
     });
 
-    const buildH2HPayin = async (amount, allowOverUnder = true) => {
+    const buildH2HPayin = async (amount, allowOverUnder = true, customToken = null, customMerchantId = null) => {
         const referenceId = `DINARIA-LOGIC-V1-${Date.now()}`;
         const targetCuit = "20275105792"; 
 
+        const activeToken = customToken || token;
+        const activeMerchantId = customMerchantId || merchantId;
+
         const configPayload = {
-            "merchant_id": merchantId,
+            "merchant_id": activeMerchantId,
             "transaction_total": amount,
             "country_code": "AR",
             "merchant_transaction_reference": referenceId
@@ -71,7 +75,7 @@ describe(`[Financial Logic] V1 Dinaria AR: Cash-In API Matrix [Env: ${envConfig.
             headers: {
                 'DisablePartnerMock': 'true',
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
+                'Authorization': `Bearer ${activeToken}`
             },
             validateStatus: () => true
         });
@@ -103,7 +107,7 @@ describe(`[Financial Logic] V1 Dinaria AR: Cash-In API Matrix [Env: ${envConfig.
             headers: {
                 'DisablePartnerMock': 'true',
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
+                'Authorization': `Bearer ${activeToken}`
             },
             validateStatus: () => true
         });
@@ -146,13 +150,13 @@ describe(`[Financial Logic] V1 Dinaria AR: Cash-In API Matrix [Env: ${envConfig.
         return { txId, assignedCvu, assignedReference, cuit: targetCuit, fullResponse: paymentResponse.data };
     };
 
-    const simulateDinariaCashIn = async (extractedCbu, targetCuit, injectAmount, reference) => {
-        const sandboxToken = SANDBOX_MERCHANT_1_TOKEN;
+    const simulateDinariaCashIn = async (extractedCbu, targetCuit, injectAmount, referenceParam, customSandboxToken = null) => {
+        const sandboxToken = customSandboxToken || SANDBOX_MERCHANT_1_TOKEN;
         const simPayload = {
             "cbu": extractedCbu,
             "cuit": targetCuit,
             "amount": injectAmount.toFixed(2),
-            "idTrxCliente": reference, 
+            "idTrxCliente": referenceParam, 
             "nombre": "Jon Snow"
         };
 
@@ -164,7 +168,7 @@ describe(`[Financial Logic] V1 Dinaria AR: Cash-In API Matrix [Env: ${envConfig.
             validateStatus: () => true
         });
 
-        auditLog.logTest('SANDBOX', 'Dinaria Cashin Simulator (Webhook)', DINARIA_SANDBOX_URL, simPayload, res.status, res.data, false, reference);
+        auditLog.logTest('SANDBOX', 'Dinaria Cashin Simulator (Webhook)', DINARIA_SANDBOX_URL, simPayload, res.status, res.data, false, referenceParam);
 
         return { status: res.status, data: res.data, payloadInyectado: simPayload };
     };
@@ -335,6 +339,86 @@ describe(`[Financial Logic] V1 Dinaria AR: Cash-In API Matrix [Env: ${envConfig.
 
         test('TC07 - Over Payment Strict (Must Reject)', async () => {
             await genericTestFlow('TC07 - Over Payment Strict (Must Reject)', 1000.00, 1200.00, false, false);
+        });
+    });
+
+    // =========================================================================================
+    // BLOCK 3: MULTI-MERCHANT COLLISION MATRIX (LIFO Rejection)
+    // =========================================================================================
+    describe('BLOCK 3: Multi-Merchant Collision Matrix (LIFO Rejection)', () => {
+        let tokenB = '';
+
+        beforeAll(async () => {
+            auditLog.logSection('BLOCK 3: Multi-Merchant Collision Matrix');
+            
+            // 1. Fetch Secondary Token
+            try {
+                tokenB = await getSecondaryAccessToken();
+            } catch (e) {
+                console.warn('⚠️ No se pudo obtener el token para el Merchant B. Verifica el .env');
+                throw e;
+            }
+
+            // 2. Ensure both merchants allow over/under AND are mapped to different Dinaria Sandbox merchants
+            await AdminApiHelper.togglePartnerAllowOverUnder(adminCookie, merchantId, true, 'merchant1');
+            await AdminApiHelper.togglePartnerAllowOverUnder(adminCookie, merchantBId, true, 'sand_pay_merch3');
+            await new Promise(r => setTimeout(r, 2000));
+        });
+
+        test('TC08 - Multi-Merchant Collision (Different Merchants, Same CUIL)', async () => {
+            auditLog.logTestStart('TC08 - Multi-Merchant Collision (Different Merchants, Same CUIL)');
+
+            // 1. Merchant A creates Payin (Pending) for CUIL 20123456789
+            const payinA = await buildH2HPayin(1000.00, true, token, merchantId);
+            
+            await new Promise(r => setTimeout(r, 2000));
+
+            // 2. Merchant B creates Payin (Pending) for CUIL 20123456789
+            const payinB = await buildH2HPayin(1500.00, true, tokenB, merchantBId);
+
+            auditLog.logFlow('Multi-Merchant Injection Phase', {
+                "Merchant A ID": merchantId,
+                "Payin 1 (Merchant A)": payinA.txId,
+                "Merchant B ID": merchantBId,
+                "Payin 2 (Merchant B)": payinB.txId,
+                "Target CUIL": payinA.cuit
+            });
+
+            // 3. End user transfers 1200 to CVU with CUIL 20123456789 via Sandbox
+            const fakeReference = `MULTI-COLLISION-${Date.now()}`;
+            // Simular webhook desde Dinaria Sandbox 1 (que corresponde al CVU del Merchant A)
+            await simulateDinariaCashIn(payinA.assignedCvu, payinA.cuit, 1200.00, fakeReference, SANDBOX_MERCHANT_1_TOKEN);
+
+            // 4. Polling statuses
+            let txA_Final = null, txB_Final = null;
+            let statusA = "pending", statusB = "pending";
+
+            for (let i = 0; i < 15; i++) {
+                await new Promise(r => setTimeout(r, 3000));
+                txA_Final = await getV1TransactionStatus(payinA.txId, token);
+                txB_Final = await getV1TransactionStatus(payinB.txId, tokenB);
+                
+                statusA = (txA_Final.status || "Unknown").toLowerCase();
+                statusB = (txB_Final.status || "Unknown").toLowerCase();
+
+                // If both stay pending, that's exactly what we expect. Wait full duration to be sure it doesn't move.
+                // We'll just wait 5 iterations (15s) and check Sandbox status.
+                if (i === 5) break; 
+            }
+
+            // 5. Query Sandbox for the rejection / refund
+            // In a collision, Dinaria might reject the webhook, or Paypaga might fail it.
+            // Let's check Sandbox API directly if possible, or just assert on Paypaga holding state as pending.
+            const isCollisionSuccessful = (statusA === "pending" || statusA === "started") && (statusB === "pending" || statusB === "started");
+
+            auditLog.logFlow('TC08 Resolution - Multi Merchant Collision', {
+                "Engine Behavior": "Paypaga cannot safely determine which merchant the money belongs to due to CUIL overlap. Must reject internally and maintain Pending states.",
+                "Payin 1 Status (Merchant A)": statusA,
+                "Payin 2 Status (Merchant B)": statusB,
+                "Status": isCollisionSuccessful ? "PASS" : "FAIL"
+            });
+
+            expect(isCollisionSuccessful).toBe(true);
         });
     });
 

@@ -50,7 +50,7 @@ class AdminApiHelper {
         }
     }
 
-    static async togglePartnerAllowOverUnder(cookie, merchantId, allowOverUnderValue) {
+    static async togglePartnerAllowOverUnder(cookie, merchantId, allowOverUnderValue, dinariaMerchantId = "sand_pay_merch3") {
         try {
             const currentEnv = (envConfig.currentEnvName || "dev").toLowerCase();
             const url = `https://admin.v2.${currentEnv}.paypaga.com/merchants/${merchantId}/partners/config`;
@@ -61,7 +61,7 @@ class AdminApiHelper {
                 "partner_id": "dinaria",
                 "config": {
                     "allowOverUnder": allowOverUnderValue ? "true" : "false",
-                    "merchantId": "sand_pay_merch3"
+                    "merchantId": dinariaMerchantId
                 }
             };
 

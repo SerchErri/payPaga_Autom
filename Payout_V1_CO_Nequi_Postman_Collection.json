@@ -1,0 +1,105 @@
+{
+	"info": {
+		"_postman_id": "d1af0d43-9607-4606-9569-e1672fedac1b",
+		"name": "Paypaga - V1 CO Payout Nequi",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Execute V1 Payout",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"function GenerateRandomString(Length, dataSet = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ') {",
+							"    let RandomString = \"\";",
+							"    for (let i = 0; i < Length; i++)",
+							"        RandomString += dataSet.charAt(Math.floor(Math.random() * dataSet.length));",
+							"    return RandomString;",
+							"}",
+							"",
+							"function GenerateRandomAmount(MajorLength, MinorLength = 0, dataSet = '123456789') {",
+							"    let RandomString = \"\";",
+							"    for (let i = 0; i < MajorLength; i++)",
+							"        RandomString += dataSet.charAt(Math.floor(Math.random() * dataSet.length));",
+							"    if (MinorLength > 0) {",
+							"        RandomString += '.';",
+							"        for (let i = 0; i < MinorLength; i++)",
+							"            RandomString += dataSet.charAt(Math.floor(Math.random() * dataSet.length));",
+							"    }",
+							"    return RandomString;",
+							"}",
+							"",
+							"function GenerateRandomNumber(Length, dataSet = '123456789') {",
+							"    let RandomString = \"\";",
+							"    for (let i = 0; i < Length; i++)",
+							"        RandomString += dataSet.charAt(Math.floor(Math.random() * dataSet.length));",
+							"    return RandomString;",
+							"}",
+							"",
+							"pm.variables.set(\"CorrelationTransactionIdentifier\", \"Test-\" + GenerateRandomString(11));",
+							"pm.variables.set(\"Amount\", GenerateRandomAmount(5));",
+							"pm.variables.set(\"TransactionDate\", (new Date()).toISOString().split(\"T\")[0]);",
+							"",
+							"// Usamos las credenciales directamente (o las lee de tus variables de entorno si existen)",
+							"const Address = pm.variables.get('AuthorisationAddress') || \"https://api.v2.dev.paypaga.com/oauth2/token\";",
+							"const Identifier = pm.variables.get('ClientAuthorisationIdentifier') || \"4e9ac30a-edda-4806-a0cf-b648eadc5399\";",
+							"const Secret = pm.variables.get('ClientSecret') || \"qZnq5X-qtbzQIhD97fzyujXw74sw-hgs\";",
+							"",
+							"const postRequest = {",
+							"    url: Address,",
+							"    method: 'POST',",
+							"    header: {",
+							"        'Content-Type': 'application/x-www-form-urlencoded',",
+							"    },",
+							"  body: {",
+							"    mode: 'urlencoded',",
+							"    urlencoded: [",
+							"        {key: \"client_id\", value: Identifier},",
+							"        {key: \"grant_type\", value: \"client_credentials\"},",
+							"        {key: \"client_secret\", value: Secret}",
+							"    ]",
+							"  }",
+							"};",
+							"",
+							"pm.sendRequest(postRequest, (error, response) => {",
+							"  if (error) {",
+							"    console.log(error);",
+							"  }",
+							"  pm.test('OAuth Token', () => {",
+							"    pm.expect(response).to.have.property('code', 200);",
+							"    pm.variables.set(\"AccessToken\", response.json().access_token);",
+							"  });",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{ "key": "Content-Type", "value": "application/json", "type": "text" },
+					{ "key": "DisablePartnerMock", "value": "true", "type": "text" },
+					{ "key": "Authorization", "value": "Bearer {{AccessToken}}", "type": "text" }
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"country_code\": \"CO\",\r\n    \"currency\": \"COP\",\r\n    \"payment_method_code\": \"nequi\",\r\n    \"transaction\": {\r\n        \"beneficiary\": {\r\n            \"first_name\": \"Sergio\",\r\n            \"last_name\": \"Test\",\r\n            \"document_type\": \"CC\",\r\n            \"document_number\": \"12345678\",\r\n            \"bank_name\": \"BANCOLOMBIA\",\r\n            \"account_type\": \"Ahorro\",\r\n            \"account_number\": \"1234567890\",\r\n            \"email\": \"serrigo@paypaga.com\",\r\n            \"phone\": \"116452210\",\r\n            \"address\": \"Calle 123 #45-67, Bogotá, Colombia\"\r\n        },\r\n        \"transaction_data\": {\r\n            \"transaction_total\": {{Amount}},\r\n            \"payout_concept\": \"Colombia Success\",\r\n            \"merchant_transaction_reference\": \"{{CorrelationTransactionIdentifier}}\"\r\n        }\r\n    }\r\n}"
+				},
+				"url": {
+					"raw": "https://api.v2.dev.paypaga.com/v1/payout",
+					"protocol": "https",
+					"host": [ "api", "v2", "dev", "paypaga", "com" ],
+					"path": [ "v1", "payout" ]
+				}
+			}
+		}
+	],
+	"variable": [
+		{ "key": "AuthorisationAddress", "value": "https://api.v2.dev.paypaga.com/oauth2/token" },
+		{ "key": "ClientAuthorisationIdentifier", "value": "4e9ac30a-edda-4806-a0cf-b648eadc5399" },
+		{ "key": "ClientSecret", "value": "qZnq5X-qtbzQIhD97fzyujXw74sw-hgs" }
+	]
+}

@@ -1,165 +1,110 @@
 {
-  "info": {
-    "name": "Paypaga Payin V1 - AR CVU (Visible Variables)",
-    "description": "Un solo request que ejecuta internamente Auth y Config a través del Pre-request Script. Usa variables de colección para que sean visibles.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "variable": [
-    {
-      "key": "config_amount",
-      "value": "10000"
-    },
-    {
-      "key": "dynamic_token",
-      "value": ""
-    },
-    {
-      "key": "dynamic_tx_id",
-      "value": ""
-    },
-    {
-      "key": "MerchantRefPayment",
-      "value": ""
-    }
-  ],
-  "item": [
-    {
-      "name": "Create Payment (Auto Auth & Config)",
-      "event": [
-        {
-          "listen": "prerequest",
-          "script": {
-            "exec": [
-              "function GenerateRandomString(totalLength = 12, prefix = 'Cfg') {",
-              "  let randomPart = '';",
-              "  const dataSet = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';",
-              "  for (let i = 0; i < totalLength - prefix.length; i++) {",
-              "    randomPart += dataSet.charAt(Math.floor(Math.random() * dataSet.length));",
-              "  }",
-              "  return `${prefix}${randomPart}`;",
-              "}",
-              "",
-              "const clientId = \"4e9ac30a-edda-4806-a0cf-b648eadc5399\";",
-              "const clientSecret = \"qZnq5X-qtbzQIhD97fzyujXw74sw-hgs\";",
-              "const merchantId = \"370914c8-c42a-4309-b50c-45656ad50b7c\";",
-              "",
-              "// Generamos dos referencias distintas y desconectadas",
-              "const refConfig = GenerateRandomString(12, 'Cfg');",
-              "const refPayment = GenerateRandomString(12, 'Pay');",
-              "pm.collectionVariables.set(\"MerchantRefPayment\", refPayment);",
-              "",
-              "// Extraemos el monto directamente del JSON del Body que escribes.",
-              "// Como el backend solo valida las matemáticas en el endpoint final de /payment,",
-              "// necesitamos inyectar esta basura en el config previo para que estalle al final.",
-              "let amount = 10000;",
-              "try {",
-              "    const reqBody = JSON.parse(pm.request.body.raw);",
-              "    if (reqBody) {",
-              "        if (reqBody.transaction_total !== undefined) amount = reqBody.transaction_total;",
-              "        else if (reqBody.amount !== undefined) amount = reqBody.amount;",
-              "    }",
-              "} catch (e) {}",
-              "",
-              "// 1. Obtener Token",
-              "const tokenRequest = {",
-              "    url: 'https://api.v2.dev.paypaga.com/oauth2/token',",
-              "    method: 'POST',",
-              "    header: {",
-              "        'Content-Type': 'application/x-www-form-urlencoded'",
-              "    },",
-              "    body: {",
-              "        mode: 'urlencoded',",
-              "        urlencoded: [",
-              "            { key: 'grant_type', value: 'client_credentials' },",
-              "            { key: 'client_id', value: clientId },",
-              "            { key: 'client_secret', value: clientSecret }",
-              "        ]",
-              "    }",
-              "};",
-              "",
-              "pm.sendRequest(tokenRequest, function (err, res) {",
-              "    if (err) return;",
-              "    const token = res.json().access_token;",
-              "    pm.collectionVariables.set(\"dynamic_token\", token);",
-              "    ",
-              "    // 2. Ejecutar Transaction Config con refConfig",
-              "    const configRequest = {",
-              "        url: 'https://api.v2.dev.paypaga.com/v1/transaction-config',",
-              "        method: 'POST',",
-              "        header: {",
-              "            'Content-Type': 'application/json',",
-              "            'Authorization': 'Bearer ' + token,",
-              "            'DisablePartnerMock': 'true'",
-              "        },",
-              "        body: {",
-              "            mode: 'raw',",
-              "            raw: JSON.stringify({",
-              "                \"merchant_id\": merchantId,",
-              "                \"transaction_total\": amount,",
-              "                \"country_code\": \"AR\",",
-              "                \"merchant_transaction_reference\": refConfig",
-              "            })",
-              "        }",
-              "    };",
-              "    ",
-              "    pm.sendRequest(configRequest, function (err2, res2) {",
-              "        if (err2) return;",
-              "        const txId = res2.json().transaction_id;",
-              "        pm.collectionVariables.set(\"dynamic_tx_id\", txId);",
-              "    });",
-              "});"
-            ],
-            "type": "text/javascript"
-          }
-        }
-      ],
-      "request": {
-        "auth": {
-          "type": "bearer",
-          "bearer": [
-            {
-              "key": "token",
-              "value": "{{dynamic_token}}",
-              "type": "string"
-            }
-          ]
-        },
-        "method": "POST",
-        "header": [
-          {
-            "key": "DisablePartnerMock",
-            "value": "true"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n    \"transaction_id\": \"{{dynamic_tx_id}}\",\n    \"amount\": 0,\n    \"country\": \"AR\",\n    \"currency\": \"ARS\",\n    \"payment_method_code\": \"cvu\",\n    \"merchant_transaction_reference\": \"{{MerchantRefPayment}}\",\n    \"merchant_customer_id\": \"client_ar_01\",\n    \"transaction_fields\": [\n    {\n      \"name\": \"first_name\",\n      \"value\": \"Barão\"\n    },\n    {\n      \"name\": \"last_name\",\n      \"value\": \"Praça\"\n    },\n    {\n      \"name\": \"document_number\",\n      \"value\": \"20084908488\"\n    }\n  ]\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "url": {
-          "raw": "https://api.v2.dev.paypaga.com/v1/payment",
-          "protocol": "https",
-          "host": [
-            "api",
-            "v2",
-            "dev",
-            "paypaga",
-            "com"
-          ],
-          "path": [
-            "v1",
-            "payment"
-          ]
-        }
-      }
-    }
-  ]
+	"info": {
+		"_postman_id": "c0af0d43-9607-4606-9569-e1672fedac1a",
+		"name": "Paypaga - V1 AR CVU Payin Dinaria",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Execute V1 CVU Payin (1-Click)",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const importeManual = 3500; // <------- ¡CAMBIAR MONTO AQUI!",
+							"",
+							"// 1. CREDENCIALES (Merchant A)",
+							"const cid = \"4e9ac30a-edda-4806-a0cf-b648eadc5399\";",
+							"const sec = \"qZnq5X-qtbzQIhD97fzyujXw74sw-hgs\";",
+							"const authUrl = \"https://api.v2.dev.paypaga.com/oauth2/token\";",
+							"const optUrl = \"https://api.v2.dev.paypaga.com/v1/transaction-config\";",
+							"",
+							"// 2. Generar una referencia única para cada pago",
+							"const correlation = 'PAY-AR-' + Math.random().toString(36).substring(2, 11).toUpperCase();",
+							"pm.variables.set(\"MerchantRefPayment\", correlation);",
+							"",
+							"console.log(\"🔄 Iniciando flujo automático por $\" + importeManual + \"...\");",
+							"",
+							"// PASO 1: Obtener Token",
+							"pm.sendRequest({",
+							"    url: authUrl,",
+							"    method: 'POST',",
+							"    header: { 'Content-Type': 'application/x-www-form-urlencoded' },",
+							"    body: {",
+							"        mode: 'urlencoded',",
+							"        urlencoded: [",
+							"            { key: \"client_id\", value: cid },",
+							"            { key: \"grant_type\", value: \"client_credentials\" },",
+							"            { key: \"client_secret\", value: sec }",
+							"        ]",
+							"    }",
+							"}, function (err, resAuth) {",
+							"    if (err || resAuth.code !== 200) {",
+							"        console.error(\"❌ Error en Auth:\", err || resAuth.text());",
+							"        return;",
+							"    }",
+							"    ",
+							"    const token = resAuth.json().access_token;",
+							"    pm.variables.set(\"AccessToken\", token);",
+							"    console.log(\"✅ Token obtenido.\");",
+							"",
+							"    // PASO 2: Obtener Configuración",
+							"    pm.sendRequest({",
+							"        url: optUrl,",
+							"        method: 'POST',",
+							"        header: {",
+							"            'Authorization': 'Bearer ' + token,",
+							"            'Content-Type': 'application/json',",
+							"            'DisablePartnerMock': 'true'",
+							"        },",
+							"        body: {",
+							"            mode: 'raw',",
+							"            raw: JSON.stringify({",
+							"                country_code: \"AR\",",
+							"                currency: \"ARS\",",
+							"                transaction_total: importeManual,",
+							"                merchant_transaction_reference: correlation",
+							"            })",
+							"        }",
+							"    }, function (err2, resConf) {",
+							"        if (err2 || resConf.code !== 200) {",
+							"            console.error(\"❌ Error en Config:\", err2 || resConf.text());",
+							"            return;",
+							"        }",
+							"        ",
+							"        const data = resConf.json();",
+							"        const txId = data.transaction_id || data.id || (data.data && data.data.transaction_id);",
+							"        pm.variables.set(\"TransactionIdentifier\", txId);",
+							"        console.log(\"✅ Configuración lista. ID:\", txId);",
+							"    });",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{ "key": "Authorization", "value": "Bearer {{AccessToken}}", "type": "text" },
+					{ "key": "Content-Type", "value": "application/json", "type": "text" },
+					{ "key": "DisablePartnerMock", "value": "true", "type": "text" }
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"transaction_id\": \"{{TransactionIdentifier}}\",\r\n    \"country_code\": \"AR\",\r\n    \"currency\": \"ARS\",\r\n    \"payment_method_code\": \"cvu\",\r\n    \"merchant_transaction_reference\": \"{{MerchantRefPayment}}\",\r\n    \"merchant_customer_id\": \"client_ar_01\",\r\n    \"transaction_fields\": [\r\n        { \"name\": \"first_name\", \"value\": \"Barão\" },\r\n        { \"name\": \"last_name\", \"value\": \"Praça\" },\r\n        { \"name\": \"document_number\", \"value\": \"20084908488\" },\r\n        { \"name\": \"document_type\", \"value\": \"CUIL\" },\r\n        { \"name\": \"email\", \"value\": \"barao.praca@ejemplo.com\" }\r\n    ],\r\n    \"allowOverUnder\": true\r\n}"
+				},
+				"url": {
+					"raw": "https://api.v2.dev.paypaga.com/v1/payment",
+					"protocol": "https",
+					"host": [ "api", "v2", "dev", "paypaga", "com" ],
+					"path": [ "v1", "payment" ]
+				}
+			}
+		}
+	],
+	"variable": [
+		{ "key": "TransactionIdentifier", "value": "" }
+	]
 }

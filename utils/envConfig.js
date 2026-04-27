@@ -14,6 +14,11 @@ const config = {
         AUTH: {
             clientId: '4e9ac30a-edda-4806-a0cf-b648eadc5399',
             clientSecret: 'qZnq5X-qtbzQIhD97fzyujXw74sw-hgs'
+        },
+        AUTH_MERCHANT_B: {
+            merchantId: 'fe3ef6a2-12cc-4861-a705-16eec96aa8a2',
+            clientId: '8355aaed-61e0-43fb-86ba-f5017a816e68',
+            clientSecret: 'tssBYxj79bsd2iknnMJpK41a9OVVgQY6'
         }
     },
     stg: {
