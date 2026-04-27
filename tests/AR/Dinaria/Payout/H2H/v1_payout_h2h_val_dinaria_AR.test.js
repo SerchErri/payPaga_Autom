@@ -66,6 +66,8 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
             validateStatus: () => true,
         });
 
+        auditLog.logTestStart(`[TEST] ${testName}`);
+
         let isExpectedToFail = true;
         if (Array.isArray(expectedStatus) && expectedStatus.some(s => s < 400)) isExpectedToFail = false;
         else if (expectedStatus < 400) isExpectedToFail = false;
@@ -92,7 +94,7 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
     // ==========================================
     describe('1. Seguridad e Integridad de la Llamada Payout H2H', () => {
 
-        test.skip('1.1. Seguridad: Forzar Unauthorized (401) con Token Falso', async () => {
+        test('1.1. Seguridad: Forzar Unauthorized (401) con Token Falso', async () => {
             const payload = buildPayload();
             const response = await axios.post(payoutUrl, payload, {
                 headers: {
@@ -102,17 +104,18 @@ describe(`[E2E H2H] V1 Payout Validaciones Dinaria AR: API Pura con Matemáticas
                 },
                 validateStatus: () => true
             });
+            auditLog.logTestStart(`[TEST] Seguridad: Token Falso Rechazado`);
             auditLog.logTest('Seguridad', 'Seguridad: Token Falso Rechazado', payoutUrl, payload, response.status, response.data, true);
             expect(response.status).toBe(401);
         });
 
-        test.skip('1.2. Root Consistency: Inconsistent Country/Currency (AR - COP)', async () => {
+        test('1.2. Root Consistency: Inconsistent Country/Currency (AR - COP)', async () => {
             const p = buildPayload({ country: "AR", currency: "COP" });
             const res = await executePayout('TC-02', 'Root: Inconsistent Country/Currency (AR-COP)', p);
             expect([400, 422]).toContain(res.status);
         });
         
-        test.skip('1.3. Payment Method: Invalid Method (Hacking String)', async () => {
+        test('1.3. Payment Method: Invalid Method (Hacking String)', async () => {
             const p = buildPayload({ payment_method: "tarjeta_falsa" });
             const res = await executePayout('TC-03', 'Payment Method: Invalid String', p);
             expect([400, 422]).toContain(res.status);

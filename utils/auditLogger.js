@@ -71,10 +71,14 @@ class AuditLogger {
             logEntry += `\n[Response]:\n\`\`\`json\n${errorMsg}\n\`\`\`\n`;
         }
 
-        logEntry += `--------------------------------------------------\n`;
-        const voucherLink = responseData?.pay_url || responseData?.url || responseData?.redirect_url || `https://api.v2.dev.paypaga.com/pay/${txid}`;
-        logEntry += `VOUCHER VIEW LINK:\n${voucherLink}\n`;
-        logEntry += `--------------------------------------------------\n`;
+        const isPayUrlOrPayin = this.filePath.toLowerCase().includes('payurl') || this.filePath.toLowerCase().includes('payin');
+        
+        if (isPayUrlOrPayin) {
+            logEntry += `--------------------------------------------------\n`;
+            const voucherLink = responseData?.pay_url || responseData?.url || responseData?.redirect_url || `https://api.v2.dev.paypaga.com/pay/${txid}`;
+            logEntry += `VOUCHER VIEW LINK:\n${voucherLink}\n`;
+            logEntry += `--------------------------------------------------\n`;
+        }
         
         fs.appendFileSync(this.filePath, logEntry);
     }
