@@ -263,138 +263,183 @@ describe(`[PayURL Dinaria AR] Validación Backend Estricta y UI [Ambiente: ${env
             return await visitCheckoutAndForceValidation(testName, checkoutUrl);
         };
 
-        // --- FIRST NAME ---
-        test('3.1. First Name: Nulo', async () => {
-            const content = await runFirstNameTest('First Name Nulo', null);
-            expect(content).toContain('is required');
-        });
-        test('3.2. First Name: Vacío', async () => {
-            const content = await runFirstNameTest('First Name Vacio', "");
-            expect(content).toContain('is required');
-        });
-        test('3.3. First Name: Incluye Números', async () => {
-            const content = await runFirstNameTest('First Name Números', "Sergio123");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.4. First Name: XSS HTML', async () => {
-            const content = await runFirstNameTest('First Name HTML Injection', "<script>alert(1)</script> Sergio");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.5. First Name: Límite Estricto (51 Chars) (TC12)', async () => {
-            const content = await runFirstNameTest('First Name Límite 51', "A".repeat(51));
-            expect(content).toContain('length must be at most 50 characters');
-        });
-        test('3.5.1. First Name: Whitespace Only (TC08)', async () => {
-            const content = await runFirstNameTest('First Name Solo Espacios', "     ");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.5.2. First Name: Special Characters (TC10)', async () => {
-            const content = await runFirstNameTest('First Name Especiales', "Jon@Snow#");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.5.3. First Name: Single Character (TC11)', async () => {
-            const content = await runFirstNameTest('First Name 1 Letra', "A");
-            const esErrorString = /least 2|al menos 2|format|formato|requerid|invalid/i.test(content);
-            expect(esErrorString).toBe(true);
-        });
-        test('3.5.4. First Name: Exact 50 Characters (TC13)', async () => {
-            const content = await runFirstNameTest('First Name 50 Chars Feliz', "A".repeat(50));
-            expect(content).toMatch(/Referencia de Pago/i);
-        });
-
-        // --- LAST NAME ---
-        test('3.6. Last Name: Nulo', async () => {
-            const content = await runLastNameTest('Last Name Nulo', null);
-            expect(content).toContain('is required');
-        });
-        test('3.7. Last Name: Vacío', async () => {
-            const content = await runLastNameTest('Last Name Vacio', "");
-            expect(content).toContain('is required');
-        });
-        test('3.8. Last Name: Incluye Números', async () => {
-            const content = await runLastNameTest('Last Name Numeros', "Gomez123");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.9. Last Name: XSS HTML', async () => {
-            const content = await runLastNameTest('Last Name HTML Injection', "<script>alert(2)</script> Gomez");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.10. Last Name: Boundary 51 Chars (TC20)', async () => {
-            const content = await runLastNameTest('Last Name Límite 51', "A".repeat(51));
-            expect(content).toContain('length must be at most 50 characters');
-        });
-        test('3.10.1. Last Name: Whitespace Only (TC16)', async () => {
-            const content = await runLastNameTest('Last Name Solo Espacios', "     ");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.10.2. Last Name: Special Characters (TC18)', async () => {
-            const content = await runLastNameTest('Last Name Especiales', "Gomez%_!");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.10.3. Last Name: Single Character (TC19)', async () => {
-            const content = await runLastNameTest('Last Name 1 Letra', "G");
-            const esErrorString = /least 2|al menos 2|format|formato|requerid|invalid/i.test(content);
-            expect(esErrorString).toBe(true);
-        });
-        test('3.10.4. Last Name: Exact 50 Characters (TC21)', async () => {
-            const content = await runLastNameTest('Last Name 50 Chars Feliz', "B".repeat(50));
-            expect(content).toMatch(/Referencia de Pago/i);
+        // ==========================================
+        // BLOQUE 3: FIRST NAME
+        // ==========================================
+        describe('3. Validaciones de First Name', () => {
+            test('3.1. First Name: Nulo', async () => {
+                const content = await runFirstNameTest('First Name Nulo', null);
+                expect(content).toContain('is required');
+            });
+            test('3.2. First Name: Vacío', async () => {
+                const content = await runFirstNameTest('First Name Vacio', "");
+                expect(content).toContain('is required');
+            });
+            test('3.3. First Name: Incluye Números', async () => {
+                const content = await runFirstNameTest('First Name Números', "Sergio123");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('3.4. First Name: XSS HTML', async () => {
+                const content = await runFirstNameTest('First Name HTML Injection', "<script>alert(1)</script> Sergio");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('3.5. First Name: Límite Estricto (51 Chars) (TC12)', async () => {
+                const content = await runFirstNameTest('First Name Límite 51', "A".repeat(51));
+                expect(content).toContain('length must be at most 50 characters');
+            });
+            test('3.5.1. First Name: Whitespace Only (TC08)', async () => {
+                const content = await runFirstNameTest('First Name Solo Espacios', "     ");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('3.5.2. First Name: Special Characters (TC10)', async () => {
+                const content = await runFirstNameTest('First Name Especiales', "Jon@Snow#");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('3.5.3. First Name: Single Character (TC11)', async () => {
+                const content = await runFirstNameTest('First Name 1 Letra', "A");
+                const esErrorString = /least 2|al menos 2|format|formato|requerid|invalid/i.test(content);
+                expect(esErrorString).toBe(true);
+            });
+            test('3.5.4. First Name: Exact 50 Characters (TC13)', async () => {
+                const content = await runFirstNameTest('First Name 50 Chars Feliz', "A".repeat(50));
+                expect(content).toMatch(/Referencia de Pago/i);
+            });
         });
 
-        // --- DOCUMENT (CUIL AR) ---
-        test('3.11. CUIL Inválido: Prefix Invalido (19...)', async () => {
-            const content = await runDocTest('CUIL Prefix 19', "19123456789");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.12. CUIL Inválido: Corto (10 digitos)', async () => {
-            const content = await runDocTest('CUIL Corto 10', "2012345678");
-            expect(content).toContain('input does not match the required format');
-        });
-        
-        test('3.13. CUIL Válido sin guiones (Voucher Exitoso) (TC25)', async () => {
-            const content = await runDocTest('CUIL sin guiones Válido', "20084908488");
-            expect(content).toMatch(/Referencia de Pago/i);
-            expect(content).toMatch(/CVU|CBU/i);
+        // ==========================================
+        // BLOQUE 4: LAST NAME
+        // ==========================================
+        describe('4. Validaciones de Last Name', () => {
+            test('4.1. Last Name: Nulo', async () => {
+                const content = await runLastNameTest('Last Name Nulo', null);
+                expect(content).toContain('is required');
+            });
+            test('4.2. Last Name: Vacío', async () => {
+                const content = await runLastNameTest('Last Name Vacio', "");
+                expect(content).toContain('is required');
+            });
+            test('4.3. Last Name: Incluye Números', async () => {
+                const content = await runLastNameTest('Last Name Numeros', "Gomez123");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('4.4. Last Name: XSS HTML', async () => {
+                const content = await runLastNameTest('Last Name HTML Injection', "<script>alert(2)</script> Gomez");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('4.5. Last Name: Boundary 51 Chars (TC20)', async () => {
+                const content = await runLastNameTest('Last Name Límite 51', "A".repeat(51));
+                expect(content).toContain('length must be at most 50 characters');
+            });
+            test('4.6. Last Name: Whitespace Only (TC16)', async () => {
+                const content = await runLastNameTest('Last Name Solo Espacios', "     ");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('4.7. Last Name: Special Characters (TC18)', async () => {
+                const content = await runLastNameTest('Last Name Especiales', "Gomez%_!");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('4.8. Last Name: Single Character (TC19)', async () => {
+                const content = await runLastNameTest('Last Name 1 Letra', "G");
+                const esErrorString = /least 2|al menos 2|format|formato|requerid|invalid/i.test(content);
+                expect(esErrorString).toBe(true);
+            });
+            test('4.9. Last Name: Exact 50 Characters (TC21)', async () => {
+                const content = await runLastNameTest('Last Name 50 Chars Feliz', "B".repeat(50));
+                expect(content).toMatch(/Referencia de Pago/i);
+            });
         });
 
-        test('3.13.1. CUIL Válido CON guiones (Voucher Exitoso) (TC24)', async () => {
-            const content = await runDocTest('CUIL con guiones', "20-08490848-8");
-            expect(content).toMatch(/Referencia de Pago/i);
-            expect(content).toMatch(/CVU|CBU/i);
+        // ==========================================
+        // BLOQUE 5: DOCUMENTO (CUIL AR)
+        // ==========================================
+        describe('5. Validaciones de Documento (CUIL AR)', () => {
+            test('5.1. CUIL Inválido: Prefix Invalido (19...)', async () => {
+                const content = await runDocTest('CUIL Prefix 19', "19123456789");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('5.2. CUIL Inválido: Corto (10 digitos)', async () => {
+                const content = await runDocTest('CUIL Corto 10', "2012345678");
+                expect(content).toContain('input does not match the required format');
+            });
+            
+            test('5.3. CUIL Válido sin guiones (Voucher Exitoso) (TC25)', async () => {
+                const content = await runDocTest('CUIL sin guiones Válido', "20084908488");
+                expect(content).toMatch(/Referencia de Pago/i);
+                expect(content).toMatch(/CVU|CBU/i);
+            });
+
+            test('5.4. CUIL Válido CON guiones (Voucher Exitoso) (TC24)', async () => {
+                const content = await runDocTest('CUIL con guiones', "20-08490848-8");
+                expect(content).toMatch(/Referencia de Pago/i);
+                expect(content).toMatch(/CVU|CBU/i);
+            });
+
+            test('5.5. CUIL Inválido: Caracteres Especiales (TC26)', async () => {
+                const content = await runDocTest('CUIL Especiales', "20-08490848-$");
+                expect(content).toContain('input does not match the required format');
+            });
+            test('5.6. CUIL Inválido: Dígito Verificador Roto', async () => {
+                const content = await runDocTest('CUIL Digito Roto', "20-08490848-9");
+                expect(content).toContain('invalid cuil/cuit');
+            });
+            test('5.7. CUIL Inválido: Puntos (TC28)', async () => {
+                const content = await runDocTest('CUIL Puntos', "20.08490848.8");
+                expect(content).toContain('input does not match the required format');
+            });
         });
 
-        test('3.14. CUIL Inválido: Caracteres Especiales (TC26)', async () => {
-            const content = await runDocTest('CUIL Especiales', "20-08490848-$");
-            expect(content).toContain('input does not match the required format');
-        });
-        test('3.15. CUIL Inválido: Dígito Verificador Roto', async () => {
-            const content = await runDocTest('CUIL Digito Roto', "20-08490848-9");
-            expect(content).toContain('invalid cuil/cuit');
-        });
-        test('3.16. CUIL Inválido: Puntos (TC28)', async () => {
-            const content = await runDocTest('CUIL Puntos', "20.08490848.8");
-            expect(content).toContain('input does not match the required format');
-        });
+        // ==========================================
+        // BLOQUE 6: PAYMENT METHODS
+        // ==========================================
+        describe('6. Validaciones de Payment Methods', () => {
+            test('6.1. Predefined Payment Method: Empty String -> Backend 400', async () => {
+                const p = generateBasePayload();
+                p.predefined_fields[0].payment_method = ""; // Empty payment method identifier
+                const res = await executePayUrlPost('Empty Pay Method Predefined', p);
+                expect([400, 422]).toContain(res.status);
+            });
 
-        // --- PAYMENT METHODS ---
-        test('3.17. Payment Method: Empty (TC29)', async () => {
-            const p = generateBasePayload();
-            p.predefined_fields[0].payment_method = ""; // Empty payment method identifier
-            const res = await executePayUrlPost('Empty Pay Method', p);
-            const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
-            const content = await visitCheckoutAndForceValidation('Empty Pay Method', checkoutUrl);
-            const esErrorString = /method|método|requerido|required|invalid|soporta/i.test(content);
-            expect(esErrorString).toBe(true);
-        });
-        test('3.18. Payment Method: Incorrect (TC30)', async () => {
-            const p = generateBasePayload();
-            p.predefined_fields[0].payment_method = "crypto_bitcoin"; // Not valid for Argentina
-            p.allowed_payment_methods = ["crypto_bitcoin"];
-            const res = await executePayUrlPost('Incorrect Pay Method', p);
-            const checkoutUrl = res.data?.url || res.data?.pay_url || res.data?.redirect_url;
-            const content = await visitCheckoutAndForceValidation('Incorrect Pay Method', checkoutUrl);
-            const esErrorString = /method|método|requerido|required|invalid|soporta/i.test(content);
-            expect(esErrorString).toBe(true);
+            test('6.2. Predefined Payment Method: Null -> Backend 400', async () => {
+                const p = generateBasePayload();
+                p.predefined_fields[0].payment_method = null; 
+                const res = await executePayUrlPost('Null Pay Method Predefined', p);
+                expect([400, 422]).toContain(res.status);
+            });
+
+            test('6.3. Predefined Payment Method: Invalid Name -> Backend 400', async () => {
+                const p = generateBasePayload();
+                p.predefined_fields[0].payment_method = "crypto_bitcoin"; // Not valid
+                const res = await executePayUrlPost('Invalid Pay Method Predefined', p);
+                expect([400, 422]).toContain(res.status);
+            });
+
+            test('6.4. Allowed Payment Method: Invalid Name -> Backend 400', async () => {
+                const p = generateBasePayload();
+                p.allowed_payment_methods = ["crypto_bitcoin"];
+                const res = await executePayUrlPost('Invalid Pay Method Allowed', p);
+                expect([400, 422]).toContain(res.status);
+            });
+
+            test('6.5. Allowed Payment Method: Array with Empty String -> Backend 400', async () => {
+                const p = generateBasePayload();
+                p.allowed_payment_methods = [""]; // Should fail if array contains empty string
+                const res = await executePayUrlPost('Empty String in Allowed Methods', p);
+                expect([400, 422]).toContain(res.status);
+            });
+
+            test('6.6. Allowed Payment Method: Empty Array [] -> Ignored by Backend (200/201)', async () => {
+                const p = generateBasePayload();
+                p.allowed_payment_methods = []; // Empty array is ignored
+                const res = await executePayUrlPost('Empty Array Allowed Methods', p);
+                expect([200, 201]).toContain(res.status);
+            });
+
+            test('6.7. Allowed Payment Method: Null -> Ignored by Backend (200/201)', async () => {
+                const p = generateBasePayload();
+                p.allowed_payment_methods = null; 
+                const res = await executePayUrlPost('Null Allowed Methods', p);
+                expect([200, 201]).toContain(res.status);
+            });
         });
     });
 });
